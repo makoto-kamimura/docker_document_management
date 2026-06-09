@@ -1,0 +1,123 @@
+services:
+  # ---- データストア ----
+  postgres:
+    image: postgres:16-alpine
+    container_name: dms-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dms_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dms}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- 全文検索エンジン ----
+  opensearch:
+    build:
+      context: .
+      dockerfile: dockerfiles/opensearch.Dockerfile
+    image: dms-opensearch:2.13.0-kuromoji
+    container_name: dms-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "DISABLE_SECURITY_PLUGIN=true"
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD:-Dms!Search1}"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+
+  # ---- オブジェクトストレージ (S3互換 / 非機密) ----
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: dms-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- バックエンドAPI (FastAPI) ----
+  backend:
+    build:
+      context: ../app/backend
+      dockerfile: ../../platform/dockerfiles/backend.Dockerfile
+    container_name: dms-backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_password}@postgres:5432/${POSTGRES_DB:-dms}
+      OPENSEARCH_URL: http://opensearch:9200
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    volumes:
+      - ../app/backend:/app
+
+  # ---- OCR/前処理ワーカー (非同期) ----
+  ocr-worker:
+    build:
+      context: ../app/backend
+      dockerfile: ../../platform/dockerfiles/ocr-worker.Dockerfile
+    container_name: dms-ocr-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-dms}:${POSTGRES_PASSWORD:-dms_password}@postgres:5432/${POSTGRES_DB:-dms}
+      OPENSEARCH_URL: http://opensearch:9200
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      - backend
+    volumes:
+      - ../app/backend:/app
+
+  # ---- Webアプリ (React + Vite) ----
+  web:
+    build:
+      context: ../app/web
+      dockerfile: ../../platform/dockerfiles/web.Dockerfile
+    container_name: dms-web
+    environment:
+      VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ../app/web:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+  opensearch_data:
+  minio_data:

@@ -1,0 +1,59 @@
+# ============================================================
+# Document Management System — ルート .gitignore
+# 各アプリ配下 (app/web, app/backend, app/mobile) にも個別の
+# .gitignore があるが、取りこぼし防止のため共通分をここで一括除外する。
+# ============================================================
+
+# ---- 環境変数・シークレット（.example のみ追跡） ----
+.env
+.env.*
+!.env.example
+
+# ---- OS / エディタ ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ---- Python (backend / ocr-worker) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / Web ----
+node_modules/
+dist/
+build/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Expo / React Native (mobile) ----
+.expo/
+.expo-shared/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# ---- テスト/カバレッジ ----
+coverage/
+
+# ---- ローカルのデータ/一時物（万一ルートに出力された場合の保険） ----
+*.tmp
+tmp/
