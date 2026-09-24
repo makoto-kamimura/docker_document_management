@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { api, getDocument, logPrint, downloadOcrTextPdf } from "../api/client";
+import { api, getDocument, logPrint, downloadPdf, type PdfKind } from "../api/client";
 
-// 認証付きで /content（処理済みプレビュー）を取得し objectURL で表示するサムネイル
-export function DocThumb({ id, className }: { id: string; className?: string }) {
+// 認証付きで画像を取得し objectURL にする（アンマウント/切替時に revoke）
+function useAuthedObjectUrl(path: string): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let revoke: string | null = null;
+    setUrl(null);
     api
-      .get(`/documents/${id}/content`, { responseType: "blob" })
+      .get(path, { responseType: "blob" })
       .then((r) => {
         const u = URL.createObjectURL(r.data as Blob);
         revoke = u;
@@ -17,7 +18,13 @@ export function DocThumb({ id, className }: { id: string; className?: string }) 
     return () => {
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [id]);
+  }, [path]);
+  return url;
+}
+
+// /content（処理済みプレビュー）のサムネイル
+export function DocThumb({ id, className }: { id: string; className?: string }) {
+  const url = useAuthedObjectUrl(`/documents/${id}/content`);
   return url ? (
     <img className={className ?? "thumb-img"} src={url} alt="" />
   ) : (
@@ -25,7 +32,27 @@ export function DocThumb({ id, className }: { id: string; className?: string }) 
   );
 }
 
-// ページめくり・拡大縮小ビューア (F-22)。page_count 未指定なら自動取得する。
+// PDF出力ボタン（モバイル詳細画面と同じ3種・同じ文言）
+const PDF_BUTTONS: { kind: PdfKind; label: string; notReadyMsg: string }[] = [
+  {
+    kind: "document",
+    label: "電子資料PDF",
+    notReadyMsg: "電子資料PDFはまだ生成されていません（OCR処理の完了後に自動生成されます）。",
+  },
+  {
+    kind: "ocr",
+    label: "OCRテキストPDF",
+    notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
+  },
+  {
+    kind: "summary",
+    label: "要約PDF",
+    notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
+  },
+];
+
+// ページめくり・拡大縮小ビューア (F-22)。
+// 開いた時点で詳細を取得し、閲覧ログ記録・既読化を行う（モバイル詳細画面と同じ, F-28/F-32）。
 export function ViewerModal({
   doc,
   onClose,
@@ -35,45 +62,27 @@ export function ViewerModal({
 }) {
   const [page, setPage] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [url, setUrl] = useState<string | null>(null);
   const [total, setTotal] = useState(Math.max(doc.page_count ?? 1, 1));
-  const [ocrBusy, setOcrBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<PdfKind | null>(null);
+  const url = useAuthedObjectUrl(`/documents/${doc.id}/pages/${page}/content`);
 
-  async function onOcrPdf() {
-    setOcrBusy(true);
+  useEffect(() => {
+    getDocument(doc.id)
+      .then((d) => setTotal(Math.max(d.page_count, 1)))
+      .catch(() => {});
+  }, [doc.id]);
+
+  async function onPdf(b: (typeof PDF_BUTTONS)[number]) {
+    setPdfBusy(b.kind);
     try {
-      await downloadOcrTextPdf(doc.id, doc.title);
-    } catch {
-      alert("OCRテキストPDFを出力できませんでした（OCR完了後に利用できます）。");
+      await downloadPdf(doc.id, b.kind, doc.title);
+    } catch (e: any) {
+      const status = e?.response?.status;
+      alert(status === 404 || status === 409 ? b.notReadyMsg : "PDFの出力に失敗しました。");
     } finally {
-      setOcrBusy(false);
+      setPdfBusy(null);
     }
   }
-
-  // page_count が無い（検索結果など）場合は詳細取得で総ページ数を補う
-  useEffect(() => {
-    if (doc.page_count == null) {
-      getDocument(doc.id)
-        .then((d) => setTotal(Math.max(d.page_count, 1)))
-        .catch(() => {});
-    }
-  }, [doc.id, doc.page_count]);
-
-  useEffect(() => {
-    let revoke: string | null = null;
-    setUrl(null);
-    api
-      .get(`/documents/${doc.id}/pages/${page}/content`, { responseType: "blob" })
-      .then((r) => {
-        const u = URL.createObjectURL(r.data as Blob);
-        revoke = u;
-        setUrl(u);
-      })
-      .catch(() => setUrl(null));
-    return () => {
-      if (revoke) URL.revokeObjectURL(revoke);
-    };
-  }, [doc.id, page]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -84,9 +93,11 @@ export function ViewerModal({
             <button className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>－</button>
             <span style={{ minWidth: 48, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
             <button className="btn btn-sm" onClick={() => setZoom((z) => Math.min(4, z + 0.25))}>＋</button>
-            <button className="btn btn-sm" onClick={onOcrPdf} disabled={ocrBusy}>
-              {ocrBusy ? "出力中…" : "📄 OCRテキストPDF"}
-            </button>
+            {PDF_BUTTONS.map((b) => (
+              <button key={b.kind} className="btn btn-sm" onClick={() => onPdf(b)} disabled={pdfBusy !== null}>
+                {pdfBusy === b.kind ? "出力中…" : `📄 ${b.label}`}
+              </button>
+            ))}
             <button className="btn btn-sm" onClick={() => { logPrint(doc.id); window.print(); }}>🖨 印刷</button>
           </div>
         </div>

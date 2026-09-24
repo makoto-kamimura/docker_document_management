@@ -150,6 +150,23 @@ a {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* 全体管理者の操作対象テナント切替（サイドバー下部） */
+.tenant-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+.tenant-switcher label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.tenant-switcher .select {
+  width: 100%;
+}
+
 .user-chip {
   display: flex;
   align-items: center;
@@ -606,6 +623,52 @@ tbody tr:hover {
   line-height: 1.7;
 }
 
+.login-hint-note {
+  color: var(--text-subtle);
+}
+
+/* デモアカウントの切替（ロールごとの見え方を試す） */
+.demo-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.demo-account {
+  flex: 1 1 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-muted);
+}
+
+.demo-account:hover {
+  border-color: var(--primary);
+}
+
+.demo-account.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.demo-account strong {
+  font-size: 12px;
+}
+
+.demo-account span {
+  font-size: 11px;
+  color: var(--text-subtle);
+  line-height: 1.4;
+}
 .login-hint code {
   background: var(--surface-3);
   padding: 1px 6px;
@@ -670,6 +733,10 @@ tbody tr:hover {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.muted {
+  color: var(--text-muted, #94a3b8);
 }
 
 .tag-self {
@@ -888,12 +955,14 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
 }
 .viewer-tools {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
 }
 .viewer-stage {
@@ -903,7 +972,10 @@ tbody tr:hover {
   height: 56vh;
   overflow: auto;
   display: flex;
-  align-items: center;
+  /* 画像が枠より高いとき、中央寄せだと上端が切れてスクロールでも戻れないため上寄せにする。
+     safe center に対応するブラウザでは、収まる場合だけ中央寄せになる */
+  align-items: flex-start;
+  align-items: safe center;
   justify-content: center;
 }
 .viewer-img {
@@ -958,4 +1030,167 @@ tbody tr:hover {
 .link-btn:hover {
   color: var(--primary);
   text-decoration: underline;
+}
+
+/* ---- 家族での確認・通知 ---- */
+.chip-important {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 700;
+}
+.chip-deadline {
+  background: #e0f2fe;
+  color: #0369a1;
+  font-weight: 700;
+}
+.chip-deadline.soon {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.chip-deadline.past {
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.family-panel .section-title {
+  margin: 14px 0 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.family-insight {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+.family-line {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.family-message {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.fam-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fam-actions .seg-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.fam-actions .seg-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.acl-user span.state-ok,
+.state-ok {
+  color: var(--success);
+  font-weight: 600;
+}
+.acl-user span.state-pending,
+.state-pending {
+  color: var(--warning);
+  font-weight: 600;
+}
+.acl-user span.state-info,
+.state-info {
+  color: var(--primary);
+  font-weight: 600;
+}
+.family-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.family-count.pending {
+  color: var(--warning);
+  font-weight: 700;
+}
+.comments .comment {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+}
+.comment-head {
+  font-size: 12px;
+}
+.comment-head span {
+  color: var(--text-subtle);
+  margin-left: 4px;
+}
+.comment-body {
+  font-size: 14px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+.comment-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.comment-form .input {
+  flex: 1;
+}
+.nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.notif-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.notif-item:hover {
+  background: var(--surface-2);
+}
+.notif-item.unread {
+  border-left: 4px solid #f59e0b;
+}
+.notif-item .notif-icon {
+  font-size: 20px;
+}
+.notif-item .notif-title {
+  font-size: 14px;
+}
+.notif-item.unread .notif-title {
+  font-weight: 700;
+}
+.notif-item .notif-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.notif-item .notif-at {
+  font-size: 11px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+}
+.thumb-important {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: #fee2e2;
+  padding: 2px 6px;
+  border-radius: 999px;
 }

@@ -7,14 +7,11 @@ import {
   addGroupMember,
   removeGroupMember,
   listUsers,
+  apiErrorMessage as errMsg,
   type Group,
   type GroupMember,
   type User,
 } from "../api/client";
-
-function errMsg(e: any, fallback: string): string {
-  return e?.response?.data?.detail ?? fallback;
-}
 
 // グループのマスタ管理 (F-36 自動共有の単位)
 export function GroupsPage() {
@@ -158,7 +155,7 @@ function MembersModal({ group, onClose }: { group: Group; onClose: () => void })
       await addGroupMember(group.id, userId);
       await reload();
     } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "追加に失敗しました。");
+      alert(errMsg(e, "追加に失敗しました。"));
     } finally {
       setBusyId(null);
     }
@@ -170,7 +167,7 @@ function MembersModal({ group, onClose }: { group: Group; onClose: () => void })
       await removeGroupMember(group.id, userId);
       await reload();
     } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "削除に失敗しました。");
+      alert(errMsg(e, "削除に失敗しました。"));
     } finally {
       setBusyId(null);
     }

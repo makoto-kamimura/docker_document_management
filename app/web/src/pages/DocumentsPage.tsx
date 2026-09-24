@@ -1,22 +1,26 @@
 import { useEffect, useState } from "react";
 import {
-  api,
+  apiErrorMessage,
+  getDocument,
   listDocuments,
   listUsers,
   listPermissions,
   upsertPermission,
   removePermission,
-  listReadReceipts,
   updateDocument,
+  updateInsight,
   listVersions,
-  getMe,
+  isAdminRole,
+  IMPORTANCE_LABEL,
   type DocumentRead,
   type DocumentVersion,
+  type Importance,
   type User,
   type PermissionLevel,
-  type ReadReceipt,
 } from "../api/client";
 import { DocThumb, ViewerModal } from "../components/DocViewer";
+import { DeadlineChip, FamilyModal, ImportanceBadge } from "../components/FamilyPanel";
+import { useMe } from "../me";
 
 const OCR_LABEL: Record<string, { text: string; cls: string }> = {
   done: { text: "完了", cls: "badge-done" },
@@ -30,18 +34,28 @@ function OcrBadge({ status }: { status: string }) {
   return <span className={`badge ${m.cls}`}>{m.text}</span>;
 }
 
+// 家に届いた紙の箱: 未読 / 重要 / 期限あり で見逃しを防ぐ（モバイルの一覧と同じ区分）
+type Filter = "all" | "unread" | "important" | "deadline" | "read";
+const FILTERS: { key: Filter; label: string; match: (d: DocumentRead) => boolean }[] = [
+  { key: "all", label: "すべて", match: () => true },
+  { key: "unread", label: "未読", match: (d) => !d.is_read },
+  { key: "important", label: "🔴 重要", match: (d) => d.importance === "high" },
+  { key: "deadline", label: "📅 期限あり", match: (d) => !!d.deadline },
+  { key: "read", label: "既読", match: (d) => d.is_read },
+];
+
 // ドキュメント一覧 (F-21)
 export function DocumentsPage() {
   const [docs, setDocs] = useState<DocumentRead[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState<User | null>(null);
+  const { me } = useMe();
   const [aclDoc, setAclDoc] = useState<DocumentRead | null>(null);
-  const [readsDoc, setReadsDoc] = useState<DocumentRead | null>(null);
+  const [familyDoc, setFamilyDoc] = useState<DocumentRead | null>(null);
   const [editDoc, setEditDoc] = useState<DocumentRead | null>(null);
   const [viewerDoc, setViewerDoc] = useState<DocumentRead | null>(null);
   const [versionsDoc, setVersionsDoc] = useState<DocumentRead | null>(null);
-  const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
+  const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<"list" | "grid">("list");
 
   function reload() {
@@ -49,15 +63,14 @@ export function DocumentsPage() {
   }
 
   useEffect(() => {
-    Promise.all([
-      listDocuments().then(setDocs),
-      getMe().then(setMe).catch(() => {}),
-    ])
+    listDocuments()
+      .then(setDocs)
       .catch(() => setError("一覧の取得に失敗しました。バックエンドの接続状態をご確認ください。"))
       .finally(() => setLoading(false));
   }, []);
 
-  const canManage = (d: DocumentRead) => me?.role === "admin" || me?.id === d.owner_id;
+  // 権限設定・既読者の確認は（テナント）管理者または所有者のみ。サーバー側でも同じ判定をする
+  const canManage = (d: DocumentRead) => isAdminRole(me?.role) || me?.id === d.owner_id;
 
   if (loading) {
     return (
@@ -78,23 +91,23 @@ export function DocumentsPage() {
     );
   }
 
-  const unreadCount = docs.filter((d) => !d.is_read).length;
-  const shown = docs.filter((d) =>
-    filter === "all" ? true : filter === "unread" ? !d.is_read : d.is_read
-  );
+  const current = FILTERS.find((f) => f.key === filter)!;
+  const shown = docs.filter(current.match);
+  const countOf = (f: (typeof FILTERS)[number]) => (f.key === "all" || f.key === "read" ? 0 : docs.filter(f.match).length);
 
   return (
     <section>
-      {/* 未読/既読 と リスト/サムネイル の切替タブ */}
+      {/* 未読/重要/期限 と リスト/サムネイル の切替タブ */}
       <div className="listbar">
         <div className="seg">
-          {([["all", "すべて"], ["unread", `未読${unreadCount ? ` (${unreadCount})` : ""}`], ["read", "既読"]] as const).map(
-            ([key, label]) => (
-              <button key={key} className={"seg-btn" + (filter === key ? " active" : "")} onClick={() => setFilter(key)}>
-                {label}
+          {FILTERS.map((f) => {
+            const n = countOf(f);
+            return (
+              <button key={f.key} className={"seg-btn" + (filter === f.key ? " active" : "")} onClick={() => setFilter(f.key)}>
+                {f.label}{n ? ` (${n})` : ""}
               </button>
-            )
-          )}
+            );
+          })}
         </div>
         <div style={{ flex: 1 }} />
         <div className="seg">
@@ -108,7 +121,7 @@ export function DocumentsPage() {
           <div className="state">
             <div className="emoji">🗂️</div>
             <h3>ドキュメントがありません</h3>
-            <p>モバイルアプリで紙資料を撮影するか、Web/APIからアップロードすると、ここに一覧表示されます。</p>
+            <p>モバイルアプリで紙資料を撮影・取り込みすると、ここに一覧表示されます。</p>
           </div>
         </div>
       ) : view === "grid" ? (
@@ -117,6 +130,7 @@ export function DocumentsPage() {
             <div key={d.id} className="thumb-card" title={d.title} onClick={() => setViewerDoc(d)} style={{ cursor: "pointer" }}>
               <DocThumb id={d.id} />
               {!d.is_read && <span className="thumb-unread" />}
+              {d.importance === "high" && <span className="thumb-important">🔴 重要</span>}
               <div className="thumb-cap">{d.title}</div>
             </div>
           ))}
@@ -128,6 +142,7 @@ export function DocumentsPage() {
               <tr>
                 <th>タイトル</th>
                 <th>状態</th>
+                <th>家族</th>
                 <th>OCR</th>
                 <th>保存先</th>
                 <th>登録日時</th>
@@ -143,12 +158,27 @@ export function DocumentsPage() {
                     {d.tags?.map((t) => (
                       <span key={t} className="chip">#{t}</span>
                     ))}
+                    {(d.importance === "high" || d.deadline) && (
+                      <div className="chips" style={{ marginTop: 6 }}>
+                        <ImportanceBadge importance={d.importance} />
+                        <DeadlineChip deadline={d.deadline} />
+                      </div>
+                    )}
                   </td>
                   <td>
                     {d.is_read ? (
                       <span className="badge badge-read">既読</span>
                     ) : (
                       <span className="badge badge-unread">未読</span>
+                    )}
+                  </td>
+                  <td>
+                    {d.family_total > 1 ? (
+                      <span className={"family-count" + (d.family_confirmed < d.family_total ? " pending" : "")}>
+                        {d.family_confirmed}/{d.family_total} 確認
+                      </span>
+                    ) : (
+                      <span className="family-count">—</span>
                     )}
                   </td>
                   <td>
@@ -166,6 +196,9 @@ export function DocumentsPage() {
                     <button className="btn btn-sm" onClick={() => setViewerDoc(d)}>
                       閲覧
                     </button>
+                    <button className="btn btn-sm" onClick={() => setFamilyDoc(d)}>
+                      家族・対応
+                    </button>
                     {canManage(d) && (
                       <>
                         <button className="btn btn-sm" onClick={() => setEditDoc(d)}>
@@ -173,9 +206,6 @@ export function DocumentsPage() {
                         </button>
                         <button className="btn btn-sm" onClick={() => setVersionsDoc(d)}>
                           履歴
-                        </button>
-                        <button className="btn btn-sm" onClick={() => setReadsDoc(d)}>
-                          既読者
                         </button>
                         <button className="btn btn-sm" onClick={() => setAclDoc(d)}>
                           権限設定
@@ -191,8 +221,24 @@ export function DocumentsPage() {
       )}
 
       {aclDoc && <PermissionsModal doc={aclDoc} onClose={() => setAclDoc(null)} />}
-      {readsDoc && <ReadReceiptsModal doc={readsDoc} onClose={() => setReadsDoc(null)} />}
-      {viewerDoc && <ViewerModal doc={viewerDoc} onClose={() => setViewerDoc(null)} />}
+      {familyDoc && (
+        <FamilyModal
+          doc={familyDoc}
+          onClose={() => {
+            setFamilyDoc(null);
+            reload(); // 自分の対応・既読を一覧に反映
+          }}
+        />
+      )}
+      {viewerDoc && (
+        <ViewerModal
+          doc={viewerDoc}
+          onClose={() => {
+            setViewerDoc(null);
+            reload(); // 閲覧で既読化されたバッジを反映（モバイルは画面フォーカス時に再取得）
+          }}
+        />
+      )}
       {editDoc && (
         <EditDocModal
           doc={editDoc}
@@ -223,18 +269,25 @@ function EditDocModal({
   const [docType, setDocType] = useState(doc.document_type ?? "");
   const [sensitivity, setSensitivity] = useState(doc.sensitivity);
   const [tagsText, setTagsText] = useState((doc.tags ?? []).join(", "));
+  // 文書解析の結果（重要度・期限・対象）。変えたときだけ手動修正として保存する
+  const [importance, setImportance] = useState<Importance | "">(doc.importance ?? "");
+  const [deadline, setDeadline] = useState(doc.deadline ?? "");
+  const [audience, setAudience] = useState(doc.audience ?? "");
   const [ocrText, setOcrText] = useState<string>("");
-  const [ocrLoaded, setOcrLoaded] = useState(false);
+  // 読み込めた元のOCRテキスト。null の間（未取得/取得失敗）は ocr_text を送らない
+  const [ocrOriginal, setOcrOriginal] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ocrLoaded = ocrOriginal !== null;
 
   // OCRテキストは詳細取得で読み込む（一覧には含めていないため）
   useEffect(() => {
-    api
-      .get(`/documents/${doc.id}`)
-      .then((r) => setOcrText((r.data as any).ocr_text ?? ""))
-      .catch(() => {})
-      .finally(() => setOcrLoaded(true));
+    getDocument(doc.id)
+      .then((d) => {
+        setOcrText(d.ocr_text ?? "");
+        setOcrOriginal(d.ocr_text ?? "");
+      })
+      .catch(() => {});
   }, [doc.id]);
 
   async function save() {
@@ -247,11 +300,23 @@ function EditDocModal({
         document_type: docType.trim() || null,
         sensitivity,
         tags: tagsText.split(",").map((t) => t.trim()).filter(Boolean),
-        ocr_text: ocrLoaded ? ocrText : undefined,
+        // 手動修正したときだけ送る（未変更で送ると再OCR等の結果を上書きしうるため）
+        ocr_text: ocrLoaded && ocrText !== ocrOriginal ? ocrText : undefined,
       });
+      const insightChanged =
+        (importance || null) !== doc.importance ||
+        (deadline || null) !== doc.deadline ||
+        (audience.trim() || null) !== doc.audience;
+      if (insightChanged) {
+        await updateInsight(doc.id, {
+          ...(importance ? { importance } : {}),
+          deadline: deadline || null,
+          audience: audience.trim() || null,
+        });
+      }
       onSaved();
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "保存に失敗しました（編集権限が必要です）。");
+      setError(apiErrorMessage(e, "保存に失敗しました（編集権限が必要です）。"));
     } finally {
       setSaving(false);
     }
@@ -282,6 +347,25 @@ function EditDocModal({
               <option value="internal">社内</option>
               <option value="confidential">機密（オンプレ保存）</option>
             </select>
+          </label>
+        </div>
+        <div className="field-row">
+          <label className="field">
+            <span>重要度</span>
+            <select className="select" value={importance} onChange={(e) => setImportance(e.target.value as Importance)}>
+              {!importance && <option value="">（解析前）</option>}
+              {(Object.keys(IMPORTANCE_LABEL) as Importance[]).map((k) => (
+                <option key={k} value={k}>{IMPORTANCE_LABEL[k]}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>期限</span>
+            <input className="input" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>対象</span>
+            <input className="input" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="保護者 など" />
           </label>
         </div>
         <label className="field">
@@ -335,7 +419,7 @@ function VersionsModal({ doc, onClose }: { doc: DocumentRead; onClose: () => voi
           <div className="state"><div className="spinner" /></div>
         ) : versions.length === 0 ? (
           <p style={{ color: "var(--text-subtle)" }}>
-            差し替え履歴はありません。モバイル/APIから再アップロードすると履歴が残ります。
+            差し替え履歴はありません。APIで差し替え（新バージョン登録）すると履歴が残ります。
           </p>
         ) : (
           <div className="acl-list">
@@ -354,56 +438,6 @@ function VersionsModal({ doc, onClose }: { doc: DocumentRead; onClose: () => voi
         )}
         <div className="modal-actions">
           <button className="btn btn-primary" onClick={onClose}>閉じる</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// 既読者一覧（誰がいつ読んだか, F-32）
-function ReadReceiptsModal({ doc, onClose }: { doc: DocumentRead; onClose: () => void }) {
-  const [reads, setReads] = useState<ReadReceipt[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    listReadReceipts(doc.id)
-      .then(setReads)
-      .catch(() => setError("既読者の取得に失敗しました（管理者または所有者のみ）。"))
-      .finally(() => setLoading(false));
-  }, [doc.id]);
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>既読者</h2>
-        <p style={{ color: "var(--text-muted)", marginTop: -4 }}>{doc.title}</p>
-        {error && <div className="login-error">{error}</div>}
-        {loading ? (
-          <div className="state">
-            <div className="spinner" />
-          </div>
-        ) : reads.length === 0 ? (
-          <p style={{ color: "var(--text-subtle)" }}>まだ誰も閲覧していません。</p>
-        ) : (
-          <div className="acl-list">
-            {reads.map((r) => (
-              <div className="acl-row" key={r.user_id}>
-                <div className="acl-user">
-                  <strong>{r.user_name}</strong>
-                  <span>{r.user_email}</span>
-                </div>
-                <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                  {new Date(r.read_at).toLocaleString("ja-JP")}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={onClose}>
-            閉じる
-          </button>
         </div>
       </div>
     </div>
@@ -451,7 +485,7 @@ function PermissionsModal({ doc, onClose }: { doc: DocumentRead; onClose: () => 
       }
     } catch (e: any) {
       setLevels((m) => ({ ...m, [userId]: prev })); // ロールバック
-      alert(e?.response?.data?.detail ?? "権限の更新に失敗しました。");
+      alert(apiErrorMessage(e, "権限の更新に失敗しました。"));
     } finally {
       setSavingId(null);
     }

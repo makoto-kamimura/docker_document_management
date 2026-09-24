@@ -8,6 +8,16 @@ const MATCH_LABEL: Record<string, string> = {
   title: "タイトル",
 };
 
+// OpenSearch のハイライト(<em>)だけを強調表示し、それ以外は文字列として描画する。
+// 本文はOCR/手動修正由来で HTML エスケープされていないため innerHTML には渡さない。
+function Highlighted({ snippet }: { snippet: string }) {
+  return (
+    <>
+      {snippet.split(/<\/?em>/).map((part, i) => (i % 2 === 1 ? <em key={i}>{part}</em> : part))}
+    </>
+  );
+}
+
 // 全文検索 (F-23〜F-25)
 export function SearchPage() {
   const [q, setQ] = useState("");
@@ -19,11 +29,12 @@ export function SearchPage() {
 
   async function onSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (!q.trim()) return;
+    const query = q.trim();
+    if (!query) return;
     setLoading(true);
     setError(null);
     try {
-      setHits(await searchDocuments(q));
+      setHits(await searchDocuments(query));
       setSearched(true);
     } catch {
       setError("検索に失敗しました。検索エンジンの接続状態をご確認ください。");
@@ -107,7 +118,9 @@ export function SearchPage() {
                   ))}
                 </div>
                 {h.snippet && (
-                  <p className="snippet" dangerouslySetInnerHTML={{ __html: h.snippet }} />
+                  <p className="snippet">
+                    <Highlighted snippet={h.snippet} />
+                  </p>
                 )}
               </div>
             </li>
