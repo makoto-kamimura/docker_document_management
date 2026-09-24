@@ -16,6 +16,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
+# 認識モデルを高精度版 tessdata_best に差し替える（apt 版は速度優先の tessdata_fast）。
+# 撮影書類の合成ベンチで文字誤り率が大きく下がることを確認済み。osd(向き判定)は apt 版のまま使う。
+ADD https://github.com/tesseract-ocr/tessdata_best/raw/4.1.0/jpn.traineddata \
+    https://github.com/tesseract-ocr/tessdata_best/raw/4.1.0/jpn_vert.traineddata \
+    https://github.com/tesseract-ocr/tessdata_best/raw/4.1.0/eng.traineddata \
+    /tmp/tessdata_best/
+RUN cd /tmp/tessdata_best \
+    && printf '%s\n' \
+       "36bdf9ac823f5911e624c30d0553e890b8abc7c31a65b3ef14da943658c40b79  jpn.traineddata" \
+       "1258be6eb2a9851f18043234ad18cca13ed32690bfff62b335c898bbea371548  jpn_vert.traineddata" \
+       "8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba  eng.traineddata" \
+       | sha256sum -c - \
+    && TESSDATA="$(dirname "$(find /usr/share/tesseract-ocr -name osd.traineddata | head -n1)")" \
+    && chmod 644 ./*.traineddata && mv ./*.traineddata "$TESSDATA"/ \
+    && rm -rf /tmp/tessdata_best \
+    && tesseract --list-langs
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

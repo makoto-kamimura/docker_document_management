@@ -79,13 +79,52 @@ def _enhance_color(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
 
 
+# OCR 用画像の長辺の目安（A4 を 300dpi 相当で読める文字サイズ）。これより小さい画像は拡大する。
+OCR_TARGET_LONG_SIDE = 3500
+OCR_MAX_UPSCALE = 2.5
+
+
+def normalize_illumination(gray: np.ndarray) -> np.ndarray:
+    """紙の明るさ(背景)を推定して割り、影・照明ムラを取り除く (F-05)。
+
+    文字より大きい窓の最大値フィルタで文字を消した「紙だけの画像」を作り、元画像を
+    それで割る。縮小画像で推定して計算量を抑える。
+    """
+    h, w = gray.shape[:2]
+    s = 4
+    small = cv2.resize(gray, (max(w // s, 1), max(h // s, 1)), interpolation=cv2.INTER_AREA)
+    k = max(9, (min(small.shape[:2]) // 30) | 1)
+    bg = cv2.dilate(small, cv2.getStructuringElement(cv2.MORPH_RECT, (k, k)))
+    bg = cv2.medianBlur(bg, min(k, 255))
+    bg = cv2.resize(bg, (w, h), interpolation=cv2.INTER_LINEAR)
+    return cv2.divide(gray, bg, scale=255)
+
+
+def prepare_for_ocr(gray: np.ndarray) -> tuple[np.ndarray, float]:
+    """OCR エンジンに渡す専用画像を作る（PDF に載る表示用画像とは別, F-13/F-15）。
+
+    影・照明ムラの除去と、文字が小さい低解像度画像の拡大を行う。二値化は Tesseract に
+    任せる（事前に二値化すると細い明朝体がかすれて精度が落ちる）。戻り値は (画像, 拡大率)。
+    """
+    out = normalize_illumination(gray)
+    h, w = out.shape[:2]
+    scale = min(OCR_TARGET_LONG_SIDE / max(h, w), OCR_MAX_UPSCALE)
+    if scale <= 1.05:
+        return out, 1.0
+    out = cv2.resize(out, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+    return out, scale
+
+
 def _compute_quality(gray: np.ndarray) -> dict:
     """品質指標と警告(ブレ/暗さ/明るすぎ/影ムラ/低解像度)を算出 (F-09/F-07)。"""
     h, w = gray.shape[:2]
     blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     brightness = float(gray.mean())
-    # 大きくぼかした照明成分の分散で影ムラを推定
-    illum = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(h, w) / 30.0)
+    # 大きくぼかした照明成分の分散で影ムラを推定。低周波成分だけを見るので、
+    # 1/8 に縮小して同じ相対半径でぼかす（原寸だと巨大カーネルで1枚10秒近くかかる）
+    s = 8
+    small = cv2.resize(gray, (max(w // s, 1), max(h // s, 1)), interpolation=cv2.INTER_AREA)
+    illum = cv2.GaussianBlur(small, (0, 0), sigmaX=max(h, w) / 30.0 / s)
     shadow = float(illum.std())
 
     warnings: list[str] = []

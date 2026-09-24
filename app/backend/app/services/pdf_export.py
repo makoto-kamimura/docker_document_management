@@ -75,14 +75,16 @@ def build_summary_pdf(title: str, summary: str) -> bytes:
 
 
 # OCR 精度を上げる強化オプション（環境により未対応なら自動フォールバック）。
-# deskew=傾き補正 / rotate_pages=向き自動補正(osd) / clean=汚れ除去(unpaper) /
-# tesseract_oem=1 は LSTM エンジン、pagesegmode=3 は全自動レイアウト解析。
+# deskew=傾き補正 / rotate_pages=向き自動補正(osd) / pagesegmode=3 は全自動レイアウト解析。
+# plugins で OCR 用画像だけに影・照明ムラ除去と低解像度時の拡大をかける (ocr_plugin)。
+# - tesseract_oem は指定しない（学習データは LSTM のみで既定でも LSTM が使われる。oem=1 を
+#   強制すると LSTM を持たない osd での向き判定がエラーになる）。
+# - clean(unpaper) は使わない（上記の前処理で不要になり、精度は同じまま処理時間が約2割増えるため）。
 _OCR_ENHANCED = dict(
     deskew=True,
     rotate_pages=True,
-    clean=True,
-    tesseract_oem=1,
     tesseract_pagesegmode=3,
+    plugins=["app.services.ocr_plugin"],
 )
 
 
