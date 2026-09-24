@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -7,38 +7,16 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import * as FileSystem from "expo-file-system/legacy";
-import { searchDocuments, API_V1_BASE, getToken, type SearchHit } from "../api/client";
+import { searchDocuments, type SearchHit } from "../api/client";
+import { DocThumb } from "../components/DocThumb";
 
 const MATCH_LABEL: Record<string, string> = {
   ocr_text: "本文",
   summary: "要約",
   title: "タイトル",
 };
-
-// 認証付きで /content を取得して表示する検索結果サムネイル
-function Thumb({ id }: { id: string }) {
-  const [uri, setUri] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    FileSystem.downloadAsync(
-      `${API_V1_BASE}/documents/${id}/content`,
-      `${FileSystem.cacheDirectory}sthumb_${id}.jpg`,
-      { headers: { Authorization: `Bearer ${getToken() ?? ""}` } }
-    )
-      .then((r) => { if (alive && r.status === 200) setUri(r.uri); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [id]);
-  return uri ? (
-    <Image source={{ uri }} style={styles.thumb} resizeMode="cover" />
-  ) : (
-    <View style={[styles.thumb, styles.thumbPh]} />
-  );
-}
 
 // HTML の <em> ハイライトタグを除去して素のスニペットにする
 function stripTags(s: string | null): string {
@@ -94,7 +72,7 @@ export function SearchScreen() {
               style={styles.row}
               onPress={() => navigation.navigate("Detail", { id: item.id, title: item.title })}
             >
-              <Thumb id={item.id} />
+              <DocThumb id={item.id} style={styles.thumb} />
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                   <Text style={styles.title}>{item.title}</Text>
@@ -144,7 +122,6 @@ const styles = StyleSheet.create({
   btnText: { color: "#fff", fontWeight: "700" },
   row: { flexDirection: "row", gap: 12, backgroundColor: "#fff", padding: 14, borderRadius: 12, marginBottom: 10, alignItems: "flex-start" },
   thumb: { width: 56, height: 72, borderRadius: 6, backgroundColor: "#e2e8f0" },
-  thumbPh: {},
   title: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
   match: { backgroundColor: "#ecfdf5", color: "#047857", fontSize: 11, fontWeight: "600", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: "hidden" },
   tags: { color: "#64748b", fontSize: 12, marginTop: 4 },

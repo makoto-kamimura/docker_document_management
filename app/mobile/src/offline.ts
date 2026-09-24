@@ -12,6 +12,8 @@ interface PendingItem {
   title: string;
   mode: CaptureMode;
   files: string[]; // 永続化したページのローカルuri
+  // 各ページの元ファイル名/MIME（PDF取込を JPEG として再送しないため）。旧形式のキューには無い
+  meta?: { name?: string; type?: string }[];
   createdAt: number;
 }
 
@@ -42,7 +44,8 @@ export async function enqueueUpload(
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const files: string[] = [];
   for (let i = 0; i < pages.length; i++) {
-    const dest = `${DIR}${id}_${i}.jpg`;
+    const ext = pages[i].type === "application/pdf" ? "pdf" : "jpg";
+    const dest = `${DIR}${id}_${i}.${ext}`;
     try {
       await FileSystem.copyAsync({ from: pages[i].uri, to: dest });
       files.push(dest);
@@ -51,8 +54,9 @@ export async function enqueueUpload(
       files.push(pages[i].uri);
     }
   }
+  const meta = pages.map((p) => ({ name: p.name, type: p.type }));
   const items = await readQueue();
-  items.push({ id, title, mode, files, createdAt: Date.now() });
+  items.push({ id, title, mode, files, meta, createdAt: Date.now() });
   await writeQueue(items);
 }
 
@@ -65,8 +69,8 @@ export async function flushQueue(): Promise<{ sent: number; remaining: number }>
     try {
       const pages: UploadPage[] = item.files.map((uri, i) => ({
         uri,
-        name: `page_${i}.jpg`,
-        type: "image/jpeg",
+        name: item.meta?.[i]?.name ?? `page_${i}.jpg`,
+        type: item.meta?.[i]?.type ?? "image/jpeg",
       }));
       await uploadDocument(item.title, pages, item.mode);
       // 成功 → ファイル削除

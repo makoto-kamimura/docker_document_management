@@ -33,9 +33,8 @@ export function CameraScreen() {
   const [pending, setPending] = useState(0);
 
   useEffect(() => {
-    // 起動時に未送信キューを自動再送 (F-11)
+    // 起動時に未送信キューを自動再送し、残件数を表示 (F-11)
     flushQueue().then(({ remaining }) => setPending(remaining)).catch(() => {});
-    pendingCount().then(setPending).catch(() => {});
   }, []);
 
   if (!permission) return <View />;
@@ -105,7 +104,7 @@ export function CameraScreen() {
     const title = titleOverride ?? `資料_${Date.now()}`;
     try {
       await uploadDocument(title, target, mode);
-      Alert.alert("アップロード完了", "OCR処理を開始しました。");
+      Alert.alert("アップロード完了", "文字の読み取りを始めました。読み取りが終わると家族にお知らせします。");
       setPages([]);
       navigation.navigate("Documents");
     } catch (e) {
