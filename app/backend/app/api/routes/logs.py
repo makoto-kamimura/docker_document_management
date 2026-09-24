@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_role
+from app.api.deps import require_role, tenant_clause, tenant_scope
 from app.db.session import get_db
 from app.models.access_log import AccessLog
+from app.models.document import Document
 from app.models.user import Role, User
 
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -18,9 +19,15 @@ def list_logs(
     user_id: uuid.UUID | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.admin)),
+    scope: uuid.UUID | None = Depends(tenant_scope),
 ):
-    """閲覧履歴照会 (F-30)。管理者のみ。"""
-    stmt = select(AccessLog).order_by(AccessLog.operated_at.desc())
+    """閲覧履歴照会 (F-30)。管理者のみ、自テナントのドキュメントの分だけ。"""
+    stmt = (
+        select(AccessLog)
+        .join(Document, Document.id == AccessLog.document_id)
+        .where(tenant_clause(Document.tenant_id, scope))
+        .order_by(AccessLog.operated_at.desc())
+    )
     if document_id:
         stmt = stmt.where(AccessLog.document_id == document_id)
     if user_id:

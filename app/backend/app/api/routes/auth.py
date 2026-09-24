@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.core.security import create_access_token, verify_password
 from app.db.session import get_db
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.user import UserRead
 
@@ -26,6 +27,8 @@ def login(
 
 
 @router.get("/me", response_model=UserRead)
-def me(current: User = Depends(get_current_user)):
-    """ログイン中ユーザーの情報 (権限ゲートやヘッダ表示に利用)。"""
+def me(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """ログイン中ユーザーの情報（権限ゲート・所属テナントの表示に利用）。"""
+    tenant = db.get(Tenant, current.tenant_id) if current.tenant_id else None
+    current.tenant_name = tenant.name if tenant else None
     return current

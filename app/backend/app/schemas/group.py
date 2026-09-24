@@ -10,6 +10,7 @@ class GroupRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    tenant_id: uuid.UUID | None = None
     name: str
     description: str | None
     created_at: datetime

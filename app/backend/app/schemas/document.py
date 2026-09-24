@@ -19,6 +19,7 @@ class DocumentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    tenant_id: uuid.UUID | None = None
     title: str
     category: str | None
     document_type: str | None
@@ -34,6 +35,21 @@ class DocumentRead(BaseModel):
     updated_at: datetime
     is_read: bool = False  # 現在ユーザー基準の既読フラグ (F-32)。一覧/取得時に算出
     tags: list[str] = []   # メタデータのタグ (F-17)。一覧/取得時に付与
+    # 文書解析（家族向け通知）の結果。解析前は importance=None
+    importance: str | None = None          # high / normal / low
+    deadline: date | None = None
+    event_date: date | None = None
+    audience: str | None = None
+    keywords: list[str] = []
+    my_action: str | None = None           # 自分の対応状況 seen / will_do / done / later
+    family_total: int = 0                  # 家族の人数（所有者を含む）
+    family_confirmed: int = 0              # そのうち確認済みの人数
+
+
+class DocumentDetail(DocumentRead):
+    """単体取得用。一覧では重いため OCR全文は詳細取得時のみ返す (F-16)。"""
+
+    ocr_text: str | None = None
 
 
 class DocumentUpdate(BaseModel):

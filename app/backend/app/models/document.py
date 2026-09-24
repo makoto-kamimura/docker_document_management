@@ -32,6 +32,11 @@ class Document(Base):
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    # 所属テナント。一覧・検索・通知はすべてこの条件で絞り込む
+    # （既存DBからの移行中のみ NULL になり得る。起動時の移行で必ず埋める）
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tenants.id"), index=True, nullable=True
+    )
     title: Mapped[str] = mapped_column(String(255), index=True)
     category: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
     document_type: Mapped[str | None] = mapped_column(String(100), nullable=True)

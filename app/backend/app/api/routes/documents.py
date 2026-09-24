@@ -4,19 +4,23 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, R
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, ensure_can_access, co_member_user_ids
+from app.api.deps import (
+    co_member_user_ids, ensure_can_access, get_current_user, is_admin, require_tenant,
+    same_tenant, tenant_clause, tenant_scope,
+)
 from app.db.session import get_db
 from app.models.access_log import AccessLog, Action
 from app.models.document import Document, Sensitivity, OcrStatus
 from app.models.document_permission import DocumentPermission, PermissionLevel
 from app.models.document_tag import DocumentTag
+from app.models.family import DocumentInsight
 from app.models.document_version import DocumentVersion
 from app.models.read_receipt import DocumentReadReceipt
-from app.models.user import User, Role
-from app.schemas.document import DocumentRead, DocumentUpdate, VersionRead
+from app.models.user import User
+from app.schemas.document import DocumentDetail, DocumentRead, DocumentUpdate, VersionRead
 from app.schemas.acl import PermissionRead, PermissionUpsert
 from app.schemas.read import ReadReceiptRead
-from app.services import storage, summarize, pdf_export, search
+from app.services import family, storage, summarize, pdf_export, search
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -31,19 +35,6 @@ def _mark_read(db: Session, doc_id, user_id) -> None:
     )
     if exists is None:
         db.add(DocumentReadReceipt(document_id=doc_id, user_id=user_id))
-
-
-def _read_doc_ids(db: Session, doc_ids: list, user_id) -> set:
-    """指定ドキュメント群のうち user が既読のものの id 集合。"""
-    if not doc_ids:
-        return set()
-    rows = db.scalars(
-        select(DocumentReadReceipt.document_id).where(
-            DocumentReadReceipt.user_id == user_id,
-            DocumentReadReceipt.document_id.in_(doc_ids),
-        )
-    ).all()
-    return set(rows)
 
 
 def _tags_for(db: Session, doc_id) -> list[str]:
@@ -72,6 +63,42 @@ def _tags_map(db: Session, doc_ids: list) -> dict:
     return out
 
 
+def _decorate(db: Session, docs: list, user: User) -> list:
+    """レスポンス用の一時属性（既読・タグ・解析結果・自分の対応・家族の確認人数）を付与する。
+
+    一覧でも N+1 にならないようまとめて取得する。pydantic from_attributes が読む。
+    """
+    doc_ids = [d.id for d in docs]
+    tags = _tags_map(db, doc_ids)
+    insights = {
+        i.document_id: i
+        for i in db.scalars(select(DocumentInsight).where(DocumentInsight.document_id.in_(doc_ids))).all()
+    } if doc_ids else {}
+    members = family.family_ids_map(db, docs)
+    reads, actions = family.status_maps(db, doc_ids)
+    for d in docs:
+        d.is_read = (d.id, user.id) in reads
+        d.tags = tags.get(d.id, [])
+        ins = insights.get(d.id)
+        d.importance = ins.importance if ins else None
+        d.deadline = ins.deadline if ins else None
+        d.event_date = ins.event_date if ins else None
+        d.audience = ins.audience if ins else None
+        d.keywords = list(ins.keywords or []) if ins else []
+        mine = actions.get((d.id, user.id))
+        d.my_action = mine.status.value if mine else None
+        ids = members.get(d.id, [])
+        d.family_total = len(ids)
+        d.family_confirmed = sum(
+            family.is_confirmed(
+                reads.get((d.id, u)),
+                actions[(d.id, u)].status if (d.id, u) in actions else None,
+            )
+            for u in ids
+        )
+    return docs
+
+
 def _reindex(db: Session, doc: Document) -> None:
     """ドキュメントを検索索引へ再登録する（メタ/OCR/タグ/要約を反映, F-23〜F-26）。
 
@@ -95,6 +122,7 @@ def _reindex(db: Session, doc: Document) -> None:
                 "category": doc.category,
                 "document_type": doc.document_type,
                 "owner_id": str(doc.owner_id),
+                "tenant_id": str(doc.tenant_id) if doc.tenant_id else None,
                 "created_at": doc.created_at.isoformat(),
             },
         )
@@ -120,14 +148,20 @@ def _media_type(file_format: str | None) -> str:
 def list_documents(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    scope: uuid.UUID | None = Depends(tenant_scope),
 ):
     """ドキュメント一覧 (F-21)。
 
-    管理者は全件、それ以外は 所有 / per-user ACL / 所有者と同一グループ のドキュメント (F-36)。
+    まず**テナント**で絞り込み、その中で テナント管理者は全件、それ以外は
+    所有 / per-user ACL / 所有者と同一グループ のドキュメント (F-36)。
     各ドキュメントに現在ユーザー基準の既読フラグ is_read を付与する (F-32)。
     """
-    stmt = select(Document).order_by(Document.created_at.desc())
-    if user.role != Role.admin:
+    stmt = (
+        select(Document)
+        .where(tenant_clause(Document.tenant_id, scope))
+        .order_by(Document.created_at.desc())
+    )
+    if not is_admin(user):
         granted = select(DocumentPermission.document_id).where(
             DocumentPermission.user_id == user.id
         )
@@ -137,14 +171,7 @@ def list_documents(
             | (Document.id.in_(granted))
             | (Document.owner_id.in_(co_members))
         )
-    docs = db.scalars(stmt).all()
-    doc_ids = [d.id for d in docs]
-    read_ids = _read_doc_ids(db, doc_ids, user.id)
-    tags = _tags_map(db, doc_ids)
-    for d in docs:
-        d.is_read = d.id in read_ids  # 一時属性。pydantic from_attributes が読む
-        d.tags = tags.get(d.id, [])
-    return docs
+    return _decorate(db, list(db.scalars(stmt).all()), user)
 
 
 @router.post("", response_model=DocumentRead, status_code=201)
@@ -155,6 +182,7 @@ def create_document(
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    tenant_id: uuid.UUID = Depends(require_tenant),
 ):
     """撮影/PDFのアップロードと登録 (F-01/F-02/F-10/F-12/F-17/F-20)。
 
@@ -170,6 +198,7 @@ def create_document(
     location = storage.resolve_location(sensitivity)
     doc = Document(
         id=uuid.uuid4(),  # ストレージキーを確定させるため明示生成（commit前に id を使う）
+        tenant_id=tenant_id,
         title=title,
         sensitivity=sensitivity,
         storage_location=location,
@@ -194,12 +223,10 @@ def create_document(
     # 自分のアップロードは既読扱い (F-32)
     _mark_read(db, doc.id, user.id)
     db.commit()
-    doc.is_read = True
-    doc.tags = []
-    return doc
+    return _decorate(db, [doc], user)[0]
 
 
-@router.get("/{doc_id}", response_model=DocumentRead)
+@router.get("/{doc_id}", response_model=DocumentDetail)
 def get_document(
     doc_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -213,9 +240,7 @@ def get_document(
     db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.view))
     _mark_read(db, doc.id, user.id)  # 閲覧で既読化 (F-32)
     db.commit()
-    doc.is_read = True
-    doc.tags = _tags_for(db, doc.id)
-    return doc
+    return _decorate(db, [doc], user)[0]
 
 
 @router.get("/{doc_id}/content")
@@ -232,9 +257,9 @@ def get_document_content(
     doc = db.get(Document, doc_id)
     if doc is None or not doc.storage_key:
         raise HTTPException(status_code=404, detail="ファイルが見つかりません")
+    # サムネイル表示にも使うため既読化しない（既読は詳細を開いた時点 GET /documents/{id} で記録。
+    # 一覧のサムネイルを見ただけで家族の「確認済み」にならないようにする）
     ensure_can_access(db, doc, user, PermissionLevel.view)
-    _mark_read(db, doc.id, user.id)  # プレビュー閲覧で既読化 (F-32)
-    db.commit()
     try:
         data = storage.get_object(doc.storage_location, f"{doc.id}/preview.jpg")
         return Response(content=data, media_type="image/jpeg")
@@ -373,7 +398,8 @@ def update_document(
     if "sensitivity" in data and data["sensitivity"] is not None:
         doc.sensitivity = data["sensitivity"]
         doc.storage_location = storage.resolve_location(doc.sensitivity)
-    if "ocr_text" in data and data["ocr_text"] is not None:
+    ocr_changed = "ocr_text" in data and data["ocr_text"] is not None and data["ocr_text"] != doc.ocr_text
+    if ocr_changed:
         doc.ocr_text = data["ocr_text"]
 
     if "tags" in data and data["tags"] is not None:
@@ -391,10 +417,10 @@ def update_document(
     db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.edit))
     db.commit()
     db.refresh(doc)
+    if ocr_changed:  # OCR を手直ししたら重要度・期限も解析し直す（手動修正済みの解析結果は保持）
+        family.apply_analysis(db, doc, doc.ocr_text)
     _reindex(db, doc)
-    doc.is_read = True
-    doc.tags = _tags_for(db, doc.id)
-    return doc
+    return _decorate(db, [doc], user)[0]
 
 
 @router.get("/{doc_id}/pages/{index}/content")
@@ -523,9 +549,7 @@ def create_version(
     db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.edit))
     db.commit()
     db.refresh(doc)
-    doc.is_read = True
-    doc.tags = _tags_for(db, doc.id)
-    return doc
+    return _decorate(db, [doc], user)[0]
 
 
 # ---- ドキュメント単位ACL (F-36/F-37)。管理者 or 所有者のみ操作可 ----
@@ -533,9 +557,9 @@ def create_version(
 
 def _load_doc_for_acl(doc_id: uuid.UUID, db: Session, user: User) -> Document:
     doc = db.get(Document, doc_id)
-    if doc is None:
+    if doc is None or not same_tenant(user, doc.tenant_id):
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
-    if user.role != Role.admin and doc.owner_id != user.id:
+    if not is_admin(user) and doc.owner_id != user.id:
         raise HTTPException(status_code=403, detail="権限設定は管理者または所有者のみ可能です")
     return doc
 
@@ -577,6 +601,8 @@ def upsert_permission(
     target = db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="対象ユーザーが見つかりません")
+    if target.tenant_id != doc.tenant_id:
+        raise HTTPException(status_code=400, detail="別のテナントのユーザーには共有できません")
     if target.id == doc.owner_id:
         raise HTTPException(status_code=400, detail="所有者には権限を付与できません（常にフル権限）")
 
@@ -629,9 +655,9 @@ def list_read_receipts(
 ):
     """既読者一覧（誰がいつ読んだか, F-32/F-30）。管理者またはドキュメント所有者のみ。"""
     doc = db.get(Document, doc_id)
-    if doc is None:
+    if doc is None or not same_tenant(user, doc.tenant_id):
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
-    if user.role != Role.admin and doc.owner_id != user.id:
+    if not is_admin(user) and doc.owner_id != user.id:
         raise HTTPException(status_code=403, detail="既読者の確認は管理者または所有者のみ可能です")
     rows = db.execute(
         select(DocumentReadReceipt, User)

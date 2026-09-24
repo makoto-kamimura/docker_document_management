@@ -24,6 +24,7 @@ _FIELD_MAPPING = {
     "category": {"type": "keyword"},
     "document_type": {"type": "keyword"},
     "owner_id": {"type": "keyword"},
+    "tenant_id": {"type": "keyword"},
     "created_at": {"type": "date"},
 }
 
@@ -66,6 +67,41 @@ def index_document(doc_id: str, body: dict) -> None:
     client().index(index=settings.search_index, id=doc_id, body=body, refresh=True)
 
 
+def ids_missing_tenant(limit: int = 500) -> list[str]:
+    """tenant_id を持たない索引ドキュメントのID。
+
+    テナント導入前に索引したものが該当する。テナント条件でフィルタすると検索に出て
+    こなくなるため、ワーカーが DB を見て埋め直す。
+    """
+    try:
+        res = client().search(
+            index=settings.search_index,
+            body={
+                "size": limit,
+                "_source": False,
+                "query": {"bool": {"must_not": [{"exists": {"field": "tenant_id"}}]}},
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - 索引未作成なら何もしない
+        print(f"[search] ids_missing_tenant skipped: {exc}")
+        return []
+    return [h["_id"] for h in res["hits"]["hits"]]
+
+
+def set_tenant(doc_ids: list[str], tenant_id: str) -> None:
+    """索引済みドキュメントのテナントを付け替える（ユーザーのテナント移動に追随）。"""
+    for doc_id in doc_ids:
+        try:
+            client().update(
+                index=settings.search_index,
+                id=doc_id,
+                body={"doc": {"tenant_id": tenant_id}},
+                refresh=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - 未索引なら次回の再索引で整合する
+            print(f"[search] set_tenant skipped {doc_id}: {exc}")
+
+
 def delete_document(doc_id: str) -> None:
     try:
         client().delete(index=settings.search_index, id=doc_id, refresh=True)
@@ -73,10 +109,21 @@ def delete_document(doc_id: str) -> None:
         pass
 
 
-def search(query: str, filters: dict | None = None, size: int = 20) -> list[dict]:
+def search(
+    query: str,
+    filters: dict | None = None,
+    size: int = 20,
+    access: dict | None = None,
+) -> list[dict]:
     """全文/キーワード検索 (F-23〜F-26)。
 
     タイトル・OCR本文・要約・タグを横断し、表記ゆれにあいまい一致(fuzziness)で対応する。
+
+    `access` は閲覧できるドキュメントの条件。
+    - `tenant_id`: 必ず一致させるテナント（テナント分離。全体管理者のみ None で全テナント横断）
+    - `owner_ids` / `doc_ids`: テナント内でさらに絞る閲覧範囲 (F-36/F-37)。
+      キー自体が無ければテナント内は全件（テナント管理者）。どちらも空リストなら
+      閲覧できるドキュメントが無いので検索しない。
     """
     must: list[dict] = [
         {
@@ -94,6 +141,19 @@ def search(query: str, filters: dict | None = None, size: int = 20) -> list[dict
         # tags は keyword サブフィールドで完全一致
         field = "tags.raw" if k == "tags" else k
         filter_clauses.append({"term": {field: v}})
+
+    if access is not None:
+        if access.get("tenant_id"):
+            filter_clauses.append({"term": {"tenant_id": str(access["tenant_id"])}})
+        if "owner_ids" in access or "doc_ids" in access:
+            should: list[dict] = []
+            if access.get("owner_ids"):
+                should.append({"terms": {"owner_id": [str(i) for i in access["owner_ids"]]}})
+            if access.get("doc_ids"):
+                should.append({"ids": {"values": [str(i) for i in access["doc_ids"]]}})
+            if not should:
+                return []
+            filter_clauses.append({"bool": {"should": should, "minimum_should_match": 1}})
 
     res = client().search(
         index=settings.search_index,
