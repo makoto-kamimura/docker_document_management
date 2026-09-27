@@ -15,14 +15,67 @@
 > Docker Desktop は事前に起動しておく（デーモンが立ち上がるまで数十秒かかる）。
 > 起動確認: `docker info` がエラーなく返ること。
 
-## 初期ログインアカウント（開発用）
+## アカウントの使い分け（デモ / 実利用）
 
-バックエンド初回起動時に自動投入される。
+デモと実利用は**テナント**（データ分離の単位）で分かれている。テナントが違えば、
+管理者であっても相手の書類・ユーザー・グループ・通知は一切見えない
+（設計: [plan-tenants.md](plan-tenants.md)）。
 
-- **メールアドレス**: `admin@example.com`
-- **パスワード**: `admin123`
+| テナント | 用途 | 初期アカウント | ロール | 公開 |
+|---|---|---|---|---|
+| `demo`（デモ） | お試し・デモ | `demo@example.com` / `demo123` | 管理者 | **公開** |
+| `demo` | お試し・デモ | `demo-registrar@example.com` / `demo123` | 登録者 | **公開** |
+| `demo` | お試し・デモ | `demo-viewer@example.com` / `demo123` | 閲覧者 | **公開** |
+| `family`（我が家） | 実利用 | `admin@example.com` / `admin123` | 管理者 | 非公開 |
+| —（所属なし） | 全体の管理 | 既存ユーザーを昇格（下記） | 全体管理者 | **非公開** |
 
-> 投入値は `platform/.env` 経由で上書き可能（`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` を設定し、バックエンド設定の `seed_admin_email` / `seed_admin_password` に対応）。本番運用では必ず変更すること。
+- デモの3アカウントはデモ用グループ「デモ家族」に所属するので、**ロールごとの見え方**
+  （管理者＝テナント内全件＋ユーザー/グループ管理、登録者＝撮影と共有された書類、閲覧者＝閲覧のみ）を
+  そのまま試せる。アカウントの案内はポートフォリオ側に載せ、ログイン画面には出さない。
+- **全体管理者は公開しない**（ログイン画面にも案内を出さない）。テナントの作成やユーザーの
+  テナント移動といった運用作業のときだけ使う。
+- デモから実利用の書類・ユーザー・グループ・通知は一切見えない。
+- **全体管理者は既定では作成しない**。運用者の既存アカウントを DB で昇格させる（テナント所属は外す）。
+  `SEED_SUPER_ADMIN_EMAIL` を指定した場合のみ初回起動時に作成され、パスワード未設定なら
+  `docker compose logs backend` に1度だけ表示される。
+- 実利用を始めるときは `admin@example.com` のパスワードを必ず変更し、家族それぞれの
+  アカウントを実利用テナントに追加してグループ「家族」に入れる。
+
+```bash
+# 既存ユーザーを全体管理者に昇格させる（テナント所属を外す）
+cd platform && docker compose exec postgres psql -U dms dms -c \
+  "UPDATE users SET role = 'super_admin', tenant_id = NULL WHERE email = 'you@example.com'"
+```
+
+### 推奨: 初回起動前に実利用テナントの管理者を自分のアカウントにする
+
+DBが空の状態（`docker compose down -v` 直後を含む）なら、`platform/.env` を先に書き換えておくと
+**既定の `admin@example.com` / `admin123` を最初から作らせない**で済む。
+
+```dotenv
+SEED_ADMIN_EMAIL=you@example.com      # 実利用テナントの管理者＝自分のアカウント
+SEED_ADMIN_PASSWORD=<強いパスワード>
+```
+
+> `admin@example.com` / `admin123` はこれまでデモ用として公開していた認証情報のため、
+> 実利用テナントの管理者として残すと**そのテナントの書類が第三者から見えてしまう**。
+> すでに作成済みの場合は、パスワードを変更するか、別の管理者を作ってから削除する。
+
+### テナント管理（全体管理者）
+
+全体管理者（super_admin）でログインすると、左メニューに **「テナント管理」** が表示される。
+
+- **作成**: 識別子（英小文字）と表示名を入力。世帯や組織を増やすときに使う。
+- **操作対象の切替**: サイドバー下部のセレクタ、または一覧の「このテナントを操作」。
+  切り替えると、ドキュメント・ユーザー・グループ・通知がそのテナントのものだけになる
+  （API では `X-Tenant-Id` ヘッダに対応。未指定なら全テナント横断）。
+- **ユーザーの移動**: 「ユーザー管理」のテナント列（全体管理者のみ表示）で変更する。
+  本人が登録したドキュメントと通知も一緒に移り、テナントをまたぐグループ所属・個別共有は解除される。
+- **削除**: ユーザーもドキュメントも無い**空のテナント**だけ削除できる。
+
+> 既存DBからのアップグレード時は、テナント導入前のデータが**実利用テナント**（`family`）へ
+> まとめて移行される。デモ側へ寄せたい場合は初回起動前に `SEED_LEGACY_TENANT_SLUG=demo` を
+> 設定するか、起動後に「ユーザー管理」からユーザーを移動する。
 
 ---
 
@@ -58,14 +111,16 @@ curl http://localhost:8000/api/v1/health
 # ログイン → トークン取得 → 一覧取得 (200 + [] が返ればOK)
 TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin@example.com&password=admin123" \
+  -d "username=demo@example.com&password=demo123" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v1/documents
 ```
 
 ### 補足
 
-- バックエンドは起動時に **DBテーブルの自動作成**と**初期管理者ユーザーの投入**を行う（`app/backend/app/main.py` の `lifespan`）。
+- バックエンドは起動時に **DBテーブルの自動作成**・**テナント移行**・**初期ユーザーの投入**を行う
+  （`app/backend/app/db/seed.py` / `app/backend/app/db/migrate.py`）。既存DBには `tenant_id` 列が
+  追加され、テナント導入前のデータは実利用テナントへ割り当てられる（冪等）。
 - バックエンドは `--reload` 付きで起動するため、`app/backend` 配下のコード変更は自動反映される。
   `requirements.txt` を変更した場合のみ再ビルドが必要:
   ```bash
@@ -134,7 +189,7 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 
 ### 動作フロー
 
-1. **ログイン画面** … `admin@example.com` / `admin123` でサインイン (F-33)。
+1. **ログイン画面** … デモは `admin@example.com` / `admin123`、実利用はご自分のアカウントでサインイン (F-33)。
 2. **撮影画面** (F-01/F-02/F-06/F-08/F-10/F-11):
    - 上部で **カラー/グレー/白黒** モードを選択 (F-06)。
    - **「撮影」**で複数ページを連続撮影。下部のサムネイル列で **削除(×)・並べ替え(◀▶)** (F-02/F-08)。
@@ -212,12 +267,16 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 
 **管理者ロール**のユーザーで Web (http://localhost:5173) にログインすると、左メニューに
 **「ユーザー管理」** が表示される（管理者以外には表示されない）。
+テナント管理者に見えるのは**自分のテナントのユーザーだけ**（全体管理者は全テナント）。
 
 ### ユーザーのマスタ管理
-- **追加**: 「＋ ユーザーを追加」→ メール/氏名/部署/ロール/初期パスワード（管理者が設定）。
+- **追加**: 「＋ ユーザーを追加」→ メール/氏名/ロール/初期パスワード（管理者が設定）。
+  作成されるユーザーは操作中のテナントに所属する（全体管理者は所属テナントを選べる）。
 - **ロール変更**: 一覧の行内セレクトで 管理者/登録者/閲覧者 を切替。
+- **テナント変更**: 全体管理者のみ。テナント列のセレクトから移動する。
 - **PWリセット / 削除**: 各行のボタンから。
-- ガード: 自分自身のロール変更・削除、最後の管理者の降格・削除は不可（サーバー側でも拒否）。
+- ガード: 自分自身のロール変更・削除、**テナント内で最後の管理者**の降格・削除は不可
+  （サーバー側でも拒否）。全体管理者ロールの付与・解除・削除は画面/APIからは行えない。
 
 ### ドキュメント単位のアクセス権限（ACL）
 - 「ドキュメント一覧」各行の **「権限設定」**（管理者またはそのドキュメントの所有者のみ表示）。
@@ -226,6 +285,8 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 
 ### グループと自動共有 (F-36)
 - 左メニュー **「グループ管理」**（管理者のみ）でグループを作成し、**メンバー管理**で所属ユーザーを追加/削除。
+- グループは**テナント内に閉じる**（別テナントのユーザーはメンバーに追加できない）。
+  グループ名はテナント内で一意なので、別の世帯が同じ「家族」という名前を使える。
 - **同じグループに所属するメンバーは、メンバーがアップロードしたドキュメントを自動で閲覧できる**
   （個別のACL付与は不要）。判定は「現在の共通グループ」で動的に行われ、グループから外すと即座に見えなくなる。
 - 自動共有は **閲覧(view)** のみ。編集/削除は従来どおり所有者/管理者/明示ACL。
@@ -250,11 +311,57 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 | GET | `/api/v1/documents/{id}/permissions` | ドキュメントのACL一覧（管理者/所有者） |
 | PUT/DELETE | `/api/v1/documents/{id}/permissions/{userId}` | ACL の付与・変更 / 解除（管理者/所有者） |
 | GET | `/api/v1/documents/{id}/reads` | 既読者一覧（誰がいつ, 管理者/所有者） |
+| GET/POST | `/api/v1/tenants` | テナント一覧 / 作成（作成は**全体管理者限定**） |
+| PATCH/DELETE | `/api/v1/tenants/{id}` | テナント更新 / 削除（**全体管理者限定**・空のみ削除可） |
 
-> ロール: `admin`(管理者) / `registrar`(登録者) / `viewer`(閲覧者)。権限レベル: `view` < `edit` < `delete`（上位は下位を包含）。
+> ロール: `super_admin`(全体管理者) / `admin`(管理者) / `registrar`(登録者) / `viewer`(閲覧者)。
+> 権限レベル: `view` < `edit` < `delete`（上位は下位を包含）。
+> すべての一覧・検索・通知はテナントで絞り込まれ、別テナントのリソースは存在を伏せて 404 を返す。
+> 全体管理者は `X-Tenant-Id` ヘッダで操作対象テナントを切り替えられる（未指定なら全テナント横断）。
 > ドキュメント一覧 `GET /api/v1/documents` は各件に現在ユーザー基準の `is_read` と `tags` を含む。
 
 ---
+
+## 4.5 家族での共有・通知（紙を見逃さない）
+
+撮影した紙は OCR 後に自動で解析され、**重要度・期限・対象**が付いて家族に通知される。
+
+### 使い方
+
+1. **家族を作る**: Web「グループ管理」でグループ（例: 山田家）を作り、家族を追加する。
+   同じグループのメンバーは、誰が撮影した紙も自動で見られる。
+2. **撮る**: モバイルで紙を撮影する。読み取りが終わると家族に通知が届く
+   （タイトルは見出しから自動で付く。例: `資料_1757…` → 「運動会の出欠についてのお願い」）。
+3. **確認する**: お知らせ（モバイル=🔔 / Web=サイドバー「お知らせ」）から開く。
+   開いた時点で既読になる。「確認した / 対応する / 対応済み / あとで確認」を選べる。
+4. **知らせる**: 未確認の家族には「もう一度通知」。未確認が複数なら全員にまとめて送れる。
+5. **やりとり**: コメントで「出欠票は提出済み」などを共有できる（他の家族に通知される）。
+
+### 自動の通知
+
+| 種類 | タイミング |
+|---|---|
+| 新しい紙 | OCR・解析の完了時に1回（登録者以外の家族へ） |
+| リマインド | 重要 or 期限つきで未確認の人へ `REMINDER_INTERVAL_HOURS`（既定24時間）ごと、最大 `REMINDER_MAX_COUNT`（既定3回）。**全員が確認したら停止** |
+| 期限が近い | 期限の `DEADLINE_NOTICE_DAYS`（既定1日）前に1回。「対応する」の人がいればその人へ／誰かが「対応済み」なら送らない |
+| コメント | コメント追加時に他の家族へ |
+
+判定は OCR ワーカーが10分ごとに実行する。設定は `platform/.env` を参照。
+
+> **解析を直す**: 期限や重要度が違うときは Web「編集」で修正できる。修正後は自動解析で上書きされない。
+
+### 関連APIエンドポイント
+
+- `GET /api/v1/documents/{id}/family` … 解析結果 + 家族それぞれの既読・対応状況
+- `PUT /api/v1/documents/{id}/action` … 自分の対応状況（`seen` / `will_do` / `done` / `later`）
+- `PUT /api/v1/documents/{id}/insight` … 重要度・期限・対象の手動修正（編集権限）
+- `POST /api/v1/documents/{id}/notify` … もう一度通知（`user_id` 未指定なら未確認の全員）
+- `GET/POST /api/v1/documents/{id}/comments` … コメント
+- `GET /api/v1/notifications` / `…/unread-count` / `POST …/{id}/read` / `POST …/read-all`
+- `POST/DELETE /api/v1/push-tokens` … 端末のプッシュトークン登録・解除
+
+> プッシュ通知は端末が Expo Push Token を登録したときだけ送られる（[app/mobile/README.md](../app/mobile/README.md)）。
+> 本文に書類の中身は含めない。`PUSH_ENABLED=false` で外部送信を止められる（アプリ内通知は残る）。
 
 ## 5. 全文検索・要約・メタデータ・バージョン (F-23〜F-26, F-16/F-17/F-19)
 
@@ -264,9 +371,13 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 - 結果には**サムネイル画像**・一致箇所（本文/要約/タイトル）・ハイライト断片・カテゴリ/タグを表示する。
   **サムネイルまたはタイトルをクリックするとページビューア（ページ送り＋ズーム）で画像を確認**できる（モバイルはタップで詳細＝画像表示）。
 - `GET /api/v1/search?q=...&category=...&tag=...`（タグは完全一致フィルタ）。
+- **閲覧範囲**: 自分のテナント内で、かつ閲覧権限のある書類だけがヒットする（索引側の
+  `tenant_id` フィルタに加え、返す直前に DB でも再確認する二重の防御）。
 
-> **OCR/要約の精度向上**: OCRは ocrmypdf で傾き補正(deskew)・向き自動補正(osd)・汚れ除去(unpaper)・LSTMエンジン(oem=1)を適用し、
-> 抽出テキストは NFKC正規化＋CJK間の余分な空白除去で整える（環境未対応時は素のOCRへ自動フォールバック）。
+> **OCR/要約の精度向上**: OCRは ocrmypdf で傾き補正(deskew)・向き自動補正(osd)を適用し、認識モデルは高精度版 `tessdata_best`
+> （ocr-worker イメージで導入）を使う。OCR に渡す画像だけに影・照明ムラ除去と低解像度時の拡大をかける（`services/ocr_plugin.py`。
+> PDF に載る表示用画像は変えない）。抽出テキストは NFKC正規化＋CJK間の余分な空白除去で整える（環境未対応時は素のOCRへ自動フォールバック）。
+> **反映には ocr-worker の再ビルドが必要**（`docker compose build ocr-worker`）。
 > 要約は Dify 未設定でも kuromoji 形態素解析の頻度スコアで重要文を抽出する（先頭数文方式から改善）。いずれもベストエフォート。
 
 ### メタデータ・タグ編集 / OCR手動修正（Web ドキュメント一覧「編集」）
@@ -293,7 +404,7 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 | ログインで 500 / `password cannot be longer than 72 bytes` | `passlib` と新しい `bcrypt` の非互換。`app/backend/requirements.txt` で `bcrypt==4.0.1` に固定済み。発生時は `docker compose up -d --build backend` で再ビルド。 |
 | `Port 8081 is running ...` | 別のExpoが8081を使用中。`npx expo start --port 8082` のように別ポートを指定する。 |
 | 実機がExpo Goでアプリを開けない / `Project is incompatible with this version of Expo Go` | Expo Go の対応SDKがプロジェクトより古い。本プロジェクトは **Expo SDK 54**。スマホの Expo Go を App Store/Google Play で更新するか、それでも古い場合はプロジェクト側をその端末の Expo Go が対応するSDKに合わせる（`npm install expo@~54` → `npx expo install --fix`）。接続時は履歴をタップせず「Enter URL manually」で `exp://<開発機のIP>:8082` を手入力すると確実。 |
-| 実機でログイン/アップロードが失敗 / 「接続先とIDをご確認ください」 | 接続先が `localhost` になっている。`localhost` は実機自身を指すため不達。`EXPO_PUBLIC_API_BASE_URL` に開発機のLAN IPを指定して `expo start`（`EXPO_PUBLIC_*` は**バンドル時に焼き込まれる**ため起動前に必須）。`app/mobile/src/api/client.ts` の既定値も LAN IP にしてある。サーバーを複数起動していると古い `localhost` バンドルに繋がることがあるので1台に統一する。 |
+| 実機でログイン/アップロードが失敗 / 「接続先とIDをご確認ください」 | 接続先が `localhost` になっている。`localhost` は実機自身を指すため不達。`EXPO_PUBLIC_API_BASE_URL` に開発機のLAN IPを指定して `expo start`（`EXPO_PUBLIC_*` は**バンドル時に焼き込まれる**ため起動前に必須）。`app/mobile/src/api/client.ts` の既定値は本番ドメインのため、ローカル開発では必ず指定する。サーバーを複数起動していると古い `localhost` バンドルに繋がることがあるので1台に統一する。 |
 | アップロードが失敗 / バックエンドに `botocore...NoSuchBucket` | MinIO のバケット (`dms-cloud` / `dms-onprem`) 未作成。バックエンド起動時に `ensure_buckets()` で自動作成される（`app/backend/app/main.py`）。`docker compose down -v` 直後などで出たら `docker compose up -d backend` で再起動。 |
 | アップロードは成功するが一覧のOCRが「待機中」のまま進まない | OCRワーカーが起動時にクラッシュしている可能性。`docker compose logs ocr-worker` を確認。`Unknown analyzer type [kuromoji]` が出る場合は OpenSearch に kuromoji プラグインが無い。本プロジェクトは `platform/dockerfiles/opensearch.Dockerfile` で同梱済み。素のイメージに戻っていたら `docker compose build opensearch && docker compose up -d opensearch ocr-worker`。復帰後はワーカーが待機中の文書を順次処理する。 |
 | ポート競合 (5173/8000/9000/9001/5432/9200) | `platform/.env` の各 `*_PORT` を変更して再起動。 |
