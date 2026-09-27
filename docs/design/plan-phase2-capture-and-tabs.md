@@ -1,6 +1,6 @@
 # 計画: フェーズ2(撮影・取り込み)全実装 + 一覧の2タブ追加
 
-> 実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context
 - フェーズ2(T-201〜T-211)を一通り実装。Expo Go の制約上、画像処理系(輪郭/台形/補正/グレースケール/影)は
@@ -30,7 +30,7 @@ Web/モバイル tsc・build、タブ動作。単一ページ後方互換。
 画像処理はベストエフォート。モバイルは tsc+bundle まで確認、カメラ実機確認は利用者側。
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - バックエンド完了: `services/image_processing.py`(OpenCV: 輪郭検出→透視変換→CLAHE→mode→quality)、
   `create_document` を複数ページ(`files`)+`mode` 対応(id明示生成でキー確定)、ワーカーを
   ページ処理→`proc`/`preview.jpg`保存→img2pdf+ocrmypdf(sidecar)で複数ページ検索可能PDF→`quality.json` へ刷新、

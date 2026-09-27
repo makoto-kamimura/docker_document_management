@@ -1,6 +1,6 @@
 # 計画: ユーザー・権限のマスタ管理画面（+ ドキュメントACL）
 
-> 実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context
 User モデルとログインのみで、ユーザー管理API・画面が無い（T-106/F-38 未着手）。権限も
@@ -31,7 +31,7 @@ JWT に role を載せるだけでドキュメント単位のアクセス制御 
 3. Web: admin で管理画面、viewer で再ログインしてナビ非表示・ACL反映。
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - バックエンド完了: `DocumentPermission` モデル（新テーブル, `create_all` で自動作成）、
   `schemas/user.py`・`schemas/acl.py`、`routes/users.py`（admin限定CRUD, 自己/最後の管理者ガード）、
   `/auth/me`、documents に ACL 3エンドポイント、`deps.ensure_can_access` を read系/一覧に適用。

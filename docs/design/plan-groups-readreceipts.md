@@ -1,6 +1,6 @@
 # 計画: グループ機能 + グループ自動共有 + 既読管理
 
-> 実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context
 ユーザー登録は管理者のみ（現状維持）。これに加えて:
@@ -31,7 +31,7 @@
 4. 閲覧で is_read=true・/reads に出る。5. Web/モバイルのバッジ・既読者一覧。
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - バックエンド完了: `Group`/`GroupMember`/`DocumentReadReceipt` モデル（新テーブル, 自動作成）、
   `schemas/group.py`・`schemas/read.py`、DocumentRead に `is_read`、`routes/groups.py`（admin限定 CRUD+メンバー）、
   documents に 既読upsert・一覧の共通グループ絞り込み+is_read・`GET /documents/{id}/reads`、

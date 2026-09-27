@@ -2,7 +2,7 @@
 
 ローカル開発環境での起動手順をまとめる。構成は **バックエンド+インフラ (Docker)** / **Webアプリ (Docker)** / **モバイルアプリ (Expo, ホスト上で起動)** の3系統。
 
-- システム概要・要件は [README.md](../README.md) / [document_management_system_requirements.md](document_management_system_requirements.md) を参照。
+- システム概要・要件は [README.md](../../README.md) / [要件定義書](../design/requirements.md) を参照。
 
 ## 0. 前提ソフトウェア
 
@@ -19,7 +19,7 @@
 
 デモと実利用は**テナント**（データ分離の単位）で分かれている。テナントが違えば、
 管理者であっても相手の書類・ユーザー・グループ・通知は一切見えない
-（設計: [plan-tenants.md](plan-tenants.md)）。
+（設計: [plan-tenants.md](../design/plan-tenants.md)）。
 
 | テナント | 用途 | 初期アカウント | ロール | 公開 |
 |---|---|---|---|---|
@@ -360,7 +360,7 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 - `GET /api/v1/notifications` / `…/unread-count` / `POST …/{id}/read` / `POST …/read-all`
 - `POST/DELETE /api/v1/push-tokens` … 端末のプッシュトークン登録・解除
 
-> プッシュ通知は端末が Expo Push Token を登録したときだけ送られる（[app/mobile/README.md](../app/mobile/README.md)）。
+> プッシュ通知は端末が Expo Push Token を登録したときだけ送られる（[app/mobile/README.md](../../app/mobile/README.md)）。
 > 本文に書類の中身は含めない。`PUSH_ENABLED=false` で外部送信を止められる（アプリ内通知は残る）。
 
 ## 5. 全文検索・要約・メタデータ・バージョン (F-23〜F-26, F-16/F-17/F-19)

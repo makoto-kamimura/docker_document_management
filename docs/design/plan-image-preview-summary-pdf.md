@@ -1,6 +1,6 @@
 # 計画: 撮影画像のプレビュー + 要約PDF出力
 
-> このファイルは実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> このファイルは実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context（背景・目的）
 実機テストで撮影→アップロード→OCRまで動くようになったが、モバイルからは
@@ -52,7 +52,7 @@ PDF本文は要約のみ（識別用にタイトル見出しのみ付与）。�
 
 ## 設定/ドキュメント
 - `platform/.env.example` に Dify セクション追記。
-- `doc/operation.md` に動作フロー・Dify設定・新エンドポイントを追記。
+- `docs/runbooks/operation.md` に動作フロー・Dify設定・新エンドポイントを追記。
 
 ---
 
@@ -64,7 +64,7 @@ PDF本文は要約のみ（識別用にタイトル見出しのみ付与）。�
 ---
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - バックエンド実装完了: config に Dify 設定、`summarize.py`（Dify+フォールバック）、
   `pdf_export.py`（reportlab/CJK）、`/documents/{id}/content` と `/documents/{id}/pdf`、
   requirements に httpx/reportlab 追加 → backend/ocr-worker 再ビルド。

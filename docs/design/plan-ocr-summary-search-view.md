@@ -1,6 +1,6 @@
 # 計画: OCR/要約の精度向上 + 検索結果から画像確認
 
-> 実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context（目的）
 1. **OCR精度を上げる**: 傾き補正・回転・ノイズ除去・LSTMエンジン指定など ocrmypdf/tesseract の前処理を強化。
@@ -39,7 +39,7 @@
 - 抽出型要約は教師なしのベストエフォート（Dify 利用時はそちらが高品質）。
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - OCR精度: `ocr-worker.Dockerfile` に `tesseract-ocr-osd`/`unpaper` 追加。`pdf_export._run_ocr` で
   deskew/rotate_pages/clean/tesseract_oem=1/pagesegmode=3 を適用し、失敗時は素のオプションへ自動フォールバック。
   `summarize.clean_ocr_text`（NFKC＋CJK間空白除去＋空白/改行圧縮）を worker で抽出直後に適用。
