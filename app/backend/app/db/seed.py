@@ -6,14 +6,18 @@
 2. 実利用テナント / デモテナントの作成
 3. テナント導入前のデータを `SEED_LEGACY_TENANT_SLUG` のテナントへ割り当て
 4. 初期ユーザーの投入（認証情報は環境変数で上書き可能）
-   - 全体管理者: **非公開**。テナントに属さず全テナントを管理する
+   - 全体管理者: **非公開**。`SEED_SUPER_ADMIN_EMAIL` を指定したときだけ作成する
    - 実利用テナント: 管理者1人
    - デモテナント: 公開する 管理者 / 登録者 / 閲覧者 の3アカウント + デモ用グループ
+
+uvicorn を複数ワーカーで起動すると各プロセスが `init_db` を呼ぶため、PostgreSQL の
+アドバイザリロックで直列化する。最初のプロセスが初期化を済ませ、後続は完了を待ってから
+冪等な再実行（実質 no-op）になる。
 """
 
 import secrets
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -105,8 +109,25 @@ def seed_demo_accounts(db: Session, tenant_id) -> None:
     db.commit()
 
 
+# init_db 用のアドバイザリロックのキー（アプリ内で一意な任意の値）
+_INIT_LOCK_KEY = 0x646D735F696E6974  # "dms_init"
+
+
 def init_db() -> None:
-    """起動時の初期化（冪等）。"""
+    """起動時の初期化（冪等）。同時に1プロセスしか実行しない。"""
+    if engine.dialect.name != "postgresql":
+        _init_db()
+        return
+    # セッションレベルのロックなので、初期化中はこの接続を保持し続ける
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _INIT_LOCK_KEY})
+        try:
+            _init_db()
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _INIT_LOCK_KEY})
+
+
+def _init_db() -> None:
     Base.metadata.create_all(bind=engine)
     migrate.add_tenant_columns()
 

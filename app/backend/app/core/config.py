@@ -64,9 +64,9 @@ class Settings(BaseSettings):
 
     # 初期ユーザー (開発用シード)
     # 全体管理者: テナントに属さずすべてのテナントを管理できる**非公開**アカウント。
-    # パスワード未設定なら起動時に自動生成してログへ1度だけ出力する。
-    # メールを空にすると作成しない（運用者が自分で作る場合）。
-    seed_super_admin_email: str = "super@example.com"
+    # 既定では作成しない（既存ユーザーを DB で super_admin に昇格させて運用する）。
+    # メールを指定すると作成し、パスワード未設定なら自動生成してログへ1度だけ出力する。
+    seed_super_admin_email: str = ""
     seed_super_admin_password: str = ""
     # 実利用テナントの管理者
     seed_admin_email: str = "admin@example.com"
