@@ -84,14 +84,6 @@ export interface User {
   tenant_name: string | null;
 }
 
-/** 公開しているデモアカウント（デモテナント）。ロールごとの見え方を試せるよう3種用意する。
- *  全体管理者(super_admin)は非公開のため載せない。Web の api/client.ts と同じ内容。 */
-export const DEMO_ACCOUNTS = [
-  { email: "demo@example.com", password: "demo123", label: "管理者" },
-  { email: "demo-registrar@example.com", password: "demo123", label: "登録者" },
-  { email: "demo-viewer@example.com", password: "demo123", label: "閲覧者" },
-];
-
 // ログイン中のユーザー（家族の一覧で「自分」を見分けるのに使う）。ログイン中はキャッシュする
 export async function getMe(): Promise<User> {
   if (me) return me;

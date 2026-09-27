@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     seed_admin_email: str = "admin@example.com"
     seed_admin_password: str = "admin123"
 
-    # デモテナントの公開アカウント（ログイン画面に案内を出す）。
+    # デモテナントの公開アカウント（案内はポートフォリオ側に載せ、アプリには出さない）。
     # ロールごとの見え方を試せるよう 管理者/登録者/閲覧者 の3つを用意し、同じグループに入れる。
     # 空にしたアカウントは作成しない。パスワードは3つ共通。
     seed_demo_password: str = "demo123"

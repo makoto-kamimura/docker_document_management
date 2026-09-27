@@ -215,33 +215,6 @@ export const ROLE_LABEL: Record<Role, string> = {
 // テナント管理者が割り当てられるロール（全体管理者は別枠で、画面からは付与できない）
 export const ASSIGNABLE_ROLES: Role[] = ["admin", "registrar", "viewer"];
 
-/** 公開しているデモアカウント（デモテナント）。ロールごとの見え方を試せるよう3種用意する。
- *  全体管理者(super_admin)は非公開のため、ここには載せない。
- *  バックエンドの SEED_DEMO_* を変更した場合はここも合わせる。 */
-export const DEMO_ACCOUNTS = [
-  {
-    email: "demo@example.com",
-    password: "demo123",
-    role: "admin" as Role,
-    label: "管理者",
-    description: "ユーザー/グループ管理・テナント内の全書類",
-  },
-  {
-    email: "demo-registrar@example.com",
-    password: "demo123",
-    role: "registrar" as Role,
-    label: "登録者",
-    description: "撮影・登録と共有された書類の閲覧",
-  },
-  {
-    email: "demo-viewer@example.com",
-    password: "demo123",
-    role: "viewer" as Role,
-    label: "閲覧者",
-    description: "共有された書類の閲覧のみ",
-  },
-];
-
 // 管理画面（ユーザー/グループ管理）を開けるか
 export function isAdminRole(role: Role | undefined | null): boolean {
   return role === "admin" || role === "super_admin";

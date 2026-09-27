@@ -9,12 +9,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { login, apiErrorMessage, DEMO_ACCOUNTS } from "../api/client";
+import { login, apiErrorMessage } from "../api/client";
 import { registerForPush, takePendingDocument } from "../push";
 
-// ログイン (F-33)。初期値は Web と同じ（メールのみ既定、パスワードは空）
+// ログイン (F-33)
 export function LoginScreen({ navigation }: any) {
-  const [email, setEmail] = useState(DEMO_ACCOUNTS[0].email);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,30 +76,6 @@ export function LoginScreen({ navigation }: any) {
             <Text style={styles.btnText}>サインイン</Text>
           )}
         </TouchableOpacity>
-
-        <Text style={styles.hint}>
-          お試し用デモ（ロールごとの見え方を試せます）
-        </Text>
-        <View style={styles.demoRow}>
-          {DEMO_ACCOUNTS.map((a) => (
-            <TouchableOpacity
-              key={a.email}
-              style={[styles.demoBtn, email === a.email && styles.demoBtnActive]}
-              onPress={() => {
-                setEmail(a.email);
-                setPassword(a.password);
-              }}
-            >
-              <Text style={[styles.demoText, email === a.email && styles.demoTextActive]}>
-                {a.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={styles.hint}>
-          パスワードはいずれも {DEMO_ACCOUNTS[0].password}{"\n"}
-          デモは専用テナントのため実利用の書類とは分離されています
-        </Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -156,16 +132,4 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 8,
   },
-  hint: { textAlign: "center", color: "#94a3b8", fontSize: 12, marginTop: 16 },
-  demoRow: { flexDirection: "row", justifyContent: "center", gap: 8, marginTop: 8 },
-  demoBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-  },
-  demoBtnActive: { borderColor: "#2563eb", backgroundColor: "#eff6ff" },
-  demoText: { color: "#64748b", fontSize: 12, fontWeight: "600" },
-  demoTextActive: { color: "#2563eb" },
 });

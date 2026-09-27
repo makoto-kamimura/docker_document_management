@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import { login, apiErrorMessage, DEMO_ACCOUNTS } from "../api/client";
+import { login, apiErrorMessage } from "../api/client";
 
 // ログイン (F-33)
 export function LoginPage() {
-  const [email, setEmail] = useState(DEMO_ACCOUNTS[0].email);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,32 +64,6 @@ export function LoginPage() {
         <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={loading}>
           {loading ? "サインイン中…" : "サインイン"}
         </button>
-
-        <div className="login-hint">
-          お試し用デモアカウント（ロールごとの見え方を試せます）
-          <div className="demo-accounts">
-            {DEMO_ACCOUNTS.map((a) => (
-              <button
-                key={a.email}
-                type="button"
-                className={"demo-account" + (email === a.email ? " active" : "")}
-                onClick={() => {
-                  setEmail(a.email);
-                  setPassword(a.password);
-                }}
-              >
-                <strong>{a.label}</strong>
-                <span>{a.description}</span>
-              </button>
-            ))}
-          </div>
-          パスワードはいずれも <code>{DEMO_ACCOUNTS[0].password}</code>
-          <br />
-          <span className="login-hint-note">
-            デモは専用テナントのため、実利用の書類とは完全に分離されています。<br />
-            実際の書類はご自分のアカウント（実利用テナント）でご利用ください
-          </span>
-        </div>
       </form>
     </div>
   );
