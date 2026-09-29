@@ -40,4 +40,4 @@ uvicorn app.main:app --reload
 | F-28〜F-30 ログ | models/access_log.py, api/routes/logs.py |
 | F-33〜F-37 認証/権限 | core/security.py, api/deps.py, api/routes/auth.py |
 
-> 雛形のため DBマイグレーション(alembic) と一部処理は未実装。詳細は ../../doc/task.md を参照。
+> 雛形のため DBマイグレーション(alembic) と一部処理は未実装。詳細は ../../docs/tasks/task.md を参照。

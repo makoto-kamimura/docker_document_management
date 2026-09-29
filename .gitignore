@@ -61,5 +61,5 @@ tmp/
 *.bak.*
 
 # ---- 非公開の運用メモ（サーバーIP等を含むため公開リポジトリに載せない） ----
-doc/qr.md
-doc/qr.png
+docs/runbooks/qr.md
+docs/runbooks/qr.png

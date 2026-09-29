@@ -1,6 +1,6 @@
 # 計画: フェーズ3・フェーズ4 全実装 + 検索に要約テキストを対象追加
 
-> 実装の計画・進捗ログ。`doc/task.md` のチェック更新と併用する。
+> 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context（背景・目的）
 - **フェーズ3 (ドキュメント化・OCR・保存)** と **フェーズ4 (閲覧・検索)** を一通り実装する。
@@ -82,7 +82,7 @@
 - 既存 index には put_mapping で summary/tags を後付け（再作成不要）。
 
 ## 進捗ログ
-- (着手) 計画を doc/ に出力。
+- (着手) 計画を docs/design/ に出力。
 - バックエンド完了:
   - `config.ocr_lang = jpn+jpn_vert+eng`（縦書き対応, T-304）。
   - 新規テーブル `DocumentTag`/`DocumentVersion`（create_all で自動作成、既存テーブルは無改変）。
