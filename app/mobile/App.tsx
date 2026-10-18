@@ -26,6 +26,8 @@ setUnauthorizedHandler(() => {
   }
 });
 
+// 一覧・検索・お知らせへのボタンは、スタックに既にあればそこへ戻る（{ pop: true }）。
+// React Navigation 7 の navigate は既定で常に新しい画面を積むため、6 の挙動に合わせている。
 const headerRow = { flexDirection: "row", alignItems: "center", gap: 16 } as const;
 const link = { color: "#2563eb", fontWeight: "600" } as const;
 
@@ -58,7 +60,7 @@ export default function App() {
             headerRight: () => (
               <View style={headerRow}>
                 <NotificationBell />
-                <TouchableOpacity onPress={() => navigation.navigate("Documents")}>
+                <TouchableOpacity onPress={() => navigation.navigate("Documents", undefined, { pop: true })}>
                   <Text style={link}>一覧 ›</Text>
                 </TouchableOpacity>
               </View>
@@ -73,7 +75,7 @@ export default function App() {
             headerRight: () => (
               <View style={headerRow}>
                 <NotificationBell />
-                <TouchableOpacity onPress={() => navigation.navigate("Search")}>
+                <TouchableOpacity onPress={() => navigation.navigate("Search", undefined, { pop: true })}>
                   <Text style={[link, { fontSize: 16 }]}>🔍 検索</Text>
                 </TouchableOpacity>
               </View>
