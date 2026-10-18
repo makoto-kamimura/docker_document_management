@@ -15,7 +15,8 @@
           "cameraPermission": "紙資料の撮影のためにカメラを使用します。"
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-sharing"
     ],
     "icon": "./assets/icon.png"
   }

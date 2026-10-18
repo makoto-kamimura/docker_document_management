@@ -4,7 +4,7 @@
 
 | フォルダ | 置くもの | 書く人 |
 |---|---|---|
-| [design/](design/) | 設計・計画の資料（初期の[要件定義書](design/requirements.md)、機能ごとの実装計画 `plan-*.md`。例: [テナント分離](design/plan-tenants.md)・[家族での共有・通知](design/plan-family-notify.md)） | 人 |
+| [design/](design/) | 設計・計画の資料（初期の[要件定義書](design/requirements.md)、機能ごとの実装計画 `plan-*.md`。例: [テナント分離](design/plan-tenants.md)・[家族での共有・通知](design/plan-family-notify.md)・[外部ストレージ連携](design/plan-external-storage.md)） | 人 |
 | [runbooks/](runbooks/) | 運用手順書（[起動・運用手順](runbooks/operation.md)。作業ごと・アラートごとに追加する） | 人 |
 | [incidents/](incidents/) | 障害のふりかえり（`YYYY-MM-DD-<概要>.md`） | 人 |
 | [automation/](automation/) | 仕分けと実装のルーティンの手順 | 人（エージェントに変えさせない） |

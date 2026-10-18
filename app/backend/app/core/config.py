@@ -23,6 +23,18 @@ class Settings(BaseSettings):
     s3_bucket_cloud: str = "dms-cloud"      # 非機密
     s3_bucket_onprem: str = "dms-onprem"    # 機密（オンプレ相当）
 
+    # 外部ストレージ連携（テナントごとの保存先: Cloudflare R2 / Google ドライブ / WebDAV(Synology NAS)）
+    # 保存先の認証情報を DB に暗号化して保存するための Fernet 鍵。未設定だと外部保存先を登録できない。
+    # 生成: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    storage_secret_key: str = ""
+    # Google ドライブ連携 (OAuth 2.0)。Google Cloud で「ウェブ アプリケーション」の OAuth クライアントを作成し、
+    # 承認済みのリダイレクト URI に google_oauth_redirect_uri と同じ値を登録する。
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/storage/google/callback"
+    # 連携完了後に戻す Web 管理画面の URL
+    web_base_url: str = "http://localhost:5173"
+
     # 認証
     jwt_secret: str = "change_me_in_production"
     jwt_algorithm: str = "HS256"

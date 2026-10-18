@@ -49,6 +49,10 @@ class Document(Base):
     sensitivity: Mapped[Sensitivity] = mapped_column(Enum(Sensitivity), default=Sensitivity.internal)
     storage_location: Mapped[StorageLocation] = mapped_column(Enum(StorageLocation), default=StorageLocation.cloud)
     storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # 保存した時点の外部保存先。NULL なら既定の MinIO（storage_location でバケットを選ぶ）
+    storage_backend_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("storage_backends.id"), index=True, nullable=True
+    )
 
     version: Mapped[int] = mapped_column(Integer, default=1)
     retention_until: Mapped[date | None] = mapped_column(Date, nullable=True)

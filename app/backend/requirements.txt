@@ -20,7 +20,10 @@ bcrypt==4.0.1
 opensearch-py==2.6.0
 
 # --- ストレージ (S3互換) ---
+# Cloudflare R2 にも使う。1.36 以上へ上げる場合は R2 向けのチェックサム設定が必要（services/storage_backends/s3.py）
 boto3==1.34.140
+# 外部の保存先の認証情報を DB に暗号化して保存する（Fernet）。python-jose 経由でも入るが直接使うため明記
+cryptography>=42
 
 # --- OCR / 画像 / PDF ---
 pytesseract==0.3.10

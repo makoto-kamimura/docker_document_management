@@ -1,5 +1,5 @@
 import axios from "axios";
-import * as FileSystem from "expo-file-system/legacy";
+import { File, Paths } from "expo-file-system";
 
 // 端末からはホストのIP/ドメインを指定する（エミュレータでは適宜変更）
 // ローカル開発時は EXPO_PUBLIC_API_BASE_URL で上書き可（例: http://192.168.x.x:8000）
@@ -56,11 +56,18 @@ export function apiErrorMessage(e: any, fallback: string): string {
 }
 
 // 認証付きでファイル(画像/PDF)を端末キャッシュへダウンロードする。
-// 呼び出し側で status を見て 200 以外を扱う。
-export function downloadAuthed(path: string, fileName: string) {
-  return FileSystem.downloadAsync(`${API_V1_BASE}${path}`, `${FileSystem.cacheDirectory}${fileName}`, {
+// 呼び出し側で status を見て 200 以外を扱う（File.downloadFileAsync は 2xx 以外を例外にして
+// ステータスを返さないため、fetch で取得して書き込む）。
+export async function downloadAuthed(path: string, fileName: string): Promise<{ status: number; uri: string }> {
+  const res = await fetch(`${API_V1_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token ?? ""}` },
   });
+  const file = new File(Paths.cache, fileName);
+  if (res.ok) {
+    file.create({ overwrite: true });
+    file.write(new Uint8Array(await res.arrayBuffer()));
+  }
+  return { status: res.status, uri: file.uri };
 }
 
 // ID/パスワード認証 (F-33)。取得したトークンはメモリ保持し以降の API に付与する。

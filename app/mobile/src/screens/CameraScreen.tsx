@@ -106,7 +106,7 @@ export function CameraScreen() {
       await uploadDocument(title, target, mode);
       Alert.alert("アップロード完了", "文字の読み取りを始めました。読み取りが終わると家族にお知らせします。");
       setPages([]);
-      navigation.navigate("Documents");
+      navigation.navigate("Documents", undefined, { pop: true });
     } catch (e) {
       // オフライン等 → 端末に退避して後で同期 (F-11)
       try {

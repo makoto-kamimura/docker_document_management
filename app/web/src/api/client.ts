@@ -316,6 +316,94 @@ export async function deleteTenant(id: string): Promise<void> {
   await api.delete(`/tenants/${id}`);
 }
 
+// ---- 保存先（外部ストレージ連携）。テナント管理者のみ ----
+
+export type StoragePreset = "r2" | "s3" | "synology" | "gdrive";
+
+export const STORAGE_PRESET_LABEL: Record<StoragePreset, string> = {
+  r2: "Cloudflare R2",
+  s3: "S3 互換",
+  synology: "Synology NAS（WebDAV）",
+  gdrive: "Google ドライブ",
+};
+
+export interface StorageBackend {
+  id: string;
+  kind: "s3" | "webdav" | "gdrive";
+  preset: StoragePreset;
+  name: string;
+  config: Record<string, any>;
+  is_onprem: boolean;
+  has_secret: boolean;
+  is_active: boolean;
+  document_count: number;
+  last_test_ok: boolean | null;
+  last_test_error: string | null;
+  last_tested_at: string | null;
+  created_at: string;
+}
+
+export interface StorageOverview {
+  active_backend_id: string | null;
+  backends: StorageBackend[];
+  secret_key_configured: boolean;
+  google_enabled: boolean;
+  editable: boolean;
+}
+
+export interface StorageTestResult {
+  ok: boolean;
+  error: string | null;
+  backend: StorageBackend;
+}
+
+export interface StorageBackendInput {
+  name?: string;
+  config?: Record<string, any>;
+  secret?: Record<string, string>;
+  is_onprem?: boolean;
+}
+
+export async function getStorageOverview(): Promise<StorageOverview> {
+  const { data } = await api.get<StorageOverview>("/storage");
+  return data;
+}
+
+export async function createStorageBackend(
+  payload: StorageBackendInput & { preset: Exclude<StoragePreset, "gdrive">; name: string }
+): Promise<StorageTestResult> {
+  const { data } = await api.post<StorageTestResult>("/storage/backends", payload);
+  return data;
+}
+
+export async function updateStorageBackend(id: string, patch: StorageBackendInput): Promise<StorageTestResult> {
+  const { data } = await api.patch<StorageTestResult>(`/storage/backends/${id}`, patch);
+  return data;
+}
+
+export async function deleteStorageBackend(id: string): Promise<void> {
+  await api.delete(`/storage/backends/${id}`);
+}
+
+export async function testStorageBackend(id: string): Promise<StorageTestResult> {
+  const { data } = await api.post<StorageTestResult>(`/storage/backends/${id}/test`);
+  return data;
+}
+
+// null で既定の保存先（サーバー内の MinIO）に戻す
+export async function setActiveStorage(backendId: string | null): Promise<StorageOverview> {
+  const { data } = await api.put<StorageOverview>("/storage/active", { backend_id: backendId });
+  return data;
+}
+
+// Google の同意画面の URL。backendId を渡すと既存の連携をつなぎ直す
+export async function googleAuthorizeUrl(backendId?: string): Promise<string> {
+  const { data } = await api.get<{ url: string }>("/storage/google/authorize", {
+    params: backendId ? { backend_id: backendId } : undefined,
+  });
+  return data.url;
+}
+
 // ---- ドキュメント単位ACL (F-36, F-37) ----
 
 export interface DocumentPermission {

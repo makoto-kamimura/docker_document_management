@@ -23,4 +23,7 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 新しく登録する書類の保存先（storage_backends.id）。NULL なら既定の MinIO。
+    # storage_backends.tenant_id と循環参照になるため外部キー制約は付けず、API 側で整合を保つ
+    storage_backend_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

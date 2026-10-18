@@ -130,6 +130,7 @@ def init_db() -> None:
 def _init_db() -> None:
     Base.metadata.create_all(bind=engine)
     migrate.add_tenant_columns()
+    migrate.add_storage_columns()
 
     with SessionLocal() as db:
         primary = ensure_tenant(

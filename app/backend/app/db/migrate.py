@@ -7,6 +7,7 @@
 実行順序 (`app.main.init_db`):
   1. `Base.metadata.create_all` … 新規テーブル(tenants など)の作成
   2. `add_tenant_columns()`      … 既存テーブルへの列追加・ロール追加
+     `add_storage_columns()`     … 外部ストレージ連携の列（tenants / documents.storage_backend_id）
   3. シード/バックフィル         … テナント作成と `tenant_id` の充填
   4. `finalize()`                … NOT NULL 制約とテナント内一意制約の付与
 """
@@ -42,6 +43,21 @@ def add_tenant_columns() -> None:
             f"REFERENCES tenants(id)"
         )
         _exec(f"CREATE INDEX IF NOT EXISTS ix_{table}_tenant_id ON {table} (tenant_id)")
+
+
+def add_storage_columns() -> None:
+    """外部ストレージ連携の列を既存テーブルへ追加する（storage_backends は create_all が作成）。"""
+    if not _is_postgres():
+        return
+    _exec("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS storage_backend_id UUID")
+    _exec(
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_backend_id UUID "
+        "REFERENCES storage_backends(id)"
+    )
+    _exec(
+        "CREATE INDEX IF NOT EXISTS ix_documents_storage_backend_id "
+        "ON documents (storage_backend_id)"
+    )
 
 
 def backfill(db: Session, legacy_tenant_id) -> None:

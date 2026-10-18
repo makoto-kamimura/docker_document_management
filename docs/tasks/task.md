@@ -133,6 +133,19 @@
 
 > 設計: [plan-tenants.md](../design/plan-tenants.md)
 
+## フェーズ11: Expo SDK 57 対応と外部ストレージ連携 ○
+
+- [x] T-1101 モバイルを Expo SDK 57 へ更新（RN 0.86 / React 19.2 / React Navigation 7 / expo-file-system の新 API。Expo Go で起動できる構成を維持）
+- [x] T-1102 保存先の抽象化（S3 互換・WebDAV・Google ドライブ）と、書類ごとの保存先の記録（`documents.storage_backend_id`）
+- [x] T-1103 保存先の認証情報の暗号化（`STORAGE_SECRET_KEY`、Fernet）
+- [x] T-1104 保存先 API と Web の「保存先」画面（登録・接続テスト・使用中の切り替え。デモテナントは変更不可）
+- [x] T-1105 Google ドライブの OAuth 連携（`drive.file`、同じアカウントでの再連携）
+- [x] T-1106 機密度の変更で保存先が変わるときのファイル移動（F-20 の不整合の修正）
+- [ ] T-1107 実サービス（Cloudflare R2 / Google ドライブ / Synology NAS）と実機の Expo Go（SDK 57）での確認
+- [ ] T-1108 登録済み書類を別の保存先へ移すツール（必要になったら）
+
+> 設計: [plan-external-storage.md](../design/plan-external-storage.md)
+
 ## 進捗サマリ
 
 | フェーズ | タスク数 | 完了 |
@@ -148,6 +161,7 @@
 | F8 確定事項 | 5 | 0 |
 | F9 家族共有/通知 ★ | 10 | 9 |
 | F10 テナント分離 ★ | 8 | 7 |
-| **合計** | **84** | **49** |
+| F11 SDK 57 / 外部ストレージ | 8 | 6 |
+| **合計** | **92** | **55** |
 
 > F3/F4 の「不要」(T-307/T-406) は完了数に含めず、それ以外を完了として計上。

@@ -21,7 +21,7 @@ export function NotificationBell() {
   }, [refresh]);
 
   return (
-    <TouchableOpacity onPress={() => navigation.navigate("Notifications")} accessibilityLabel="お知らせ">
+    <TouchableOpacity onPress={() => navigation.navigate("Notifications", undefined, { pop: true })} accessibilityLabel="お知らせ">
       <View>
         <Text style={{ fontSize: 20 }}>🔔</Text>
         {count > 0 && (

@@ -107,7 +107,7 @@ def _reindex(db: Session, doc: Document) -> None:
     summary = ""
     try:
         summary = storage.get_object(
-            doc.storage_location, f"{doc.id}/summary.txt"
+            doc, f"{doc.id}/summary.txt"
         ).decode("utf-8", "ignore")
     except Exception:
         summary = ""
@@ -195,13 +195,15 @@ def create_document(
 
     first = files[0]
     fmt = (first.filename or "").split(".")[-1].lower() or "jpg"
-    location = storage.resolve_location(sensitivity)
+    # 保存先: テナントが使用中の外部保存先（無ければ既定の MinIO）。機密書類はオンプレのみ
+    location, backend_id = storage.resolve_target(db, tenant_id, sensitivity)
     doc = Document(
         id=uuid.uuid4(),  # ストレージキーを確定させるため明示生成（commit前に id を使う）
         tenant_id=tenant_id,
         title=title,
         sensitivity=sensitivity,
         storage_location=location,
+        storage_backend_id=backend_id,
         ocr_status=OcrStatus.pending,
         owner_id=user.id,
         file_format=fmt,
@@ -209,14 +211,20 @@ def create_document(
     )
     # ページを決定的キーで保存（ワーカーが page_count から再構成する）
     first_key = f"{doc.id}/pages/000"
-    for i, f in enumerate(files):
-        storage.put_object(
-            location, f"{doc.id}/pages/{i:03d}", f.file.read(),
-            f.content_type or "application/octet-stream",
+    try:
+        for i, f in enumerate(files):
+            storage.put_object(
+                doc, f"{doc.id}/pages/{i:03d}", f.file.read(),
+                f.content_type or "application/octet-stream",
+            )
+        # 撮影モードを quality 経由でワーカーに渡すための簡易メタ保存
+        storage.put_object(doc, f"{doc.id}/mode", mode.encode(), "text/plain")
+    except storage.StorageError as exc:
+        # 端末側はオフライン時と同じく送信待ちに残し、あとで再送する
+        raise HTTPException(
+            status_code=503, detail=f"保存先に書き込めませんでした。時間をおいて再送してください（{exc}）"
         )
     doc.storage_key = first_key  # 暫定プレビュー（ワーカーが preview.jpg を生成後はそちら優先）
-    # 撮影モードを quality 経由でワーカーに渡すための簡易メタ保存
-    storage.put_object(location, f"{doc.id}/mode", mode.encode(), "text/plain")
     db.add(doc)
     db.commit()
     db.refresh(doc)
@@ -261,10 +269,10 @@ def get_document_content(
     # 一覧のサムネイルを見ただけで家族の「確認済み」にならないようにする）
     ensure_can_access(db, doc, user, PermissionLevel.view)
     try:
-        data = storage.get_object(doc.storage_location, f"{doc.id}/preview.jpg")
+        data = storage.get_object(doc, f"{doc.id}/preview.jpg")
         return Response(content=data, media_type="image/jpeg")
     except Exception:
-        data = storage.get_object(doc.storage_location, doc.storage_key)
+        data = storage.get_object(doc, doc.storage_key)
         return Response(content=data, media_type=_media_type(doc.file_format))
 
 
@@ -280,7 +288,7 @@ def get_document_quality(
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
     ensure_can_access(db, doc, user, PermissionLevel.view)
     try:
-        raw = storage.get_object(doc.storage_location, f"{doc.id}/quality.json")
+        raw = storage.get_object(doc, f"{doc.id}/quality.json")
         import json
         return json.loads(raw)
     except Exception:
@@ -303,7 +311,7 @@ def get_document_pdf(
     ensure_can_access(db, doc, user, PermissionLevel.view)
     key = f"{doc.id}/document.pdf"  # ocr_worker.document_pdf_key と同一規則
     try:
-        data = storage.get_object(doc.storage_location, key)
+        data = storage.get_object(doc, key)
     except Exception:
         raise HTTPException(status_code=404, detail="電子資料PDFはまだ生成されていません")
 
@@ -395,9 +403,19 @@ def update_document(
         doc.document_type = data["document_type"]
     if "retention_until" in data:
         doc.retention_until = data["retention_until"]
+    cleanup_old_storage = None
     if "sensitivity" in data and data["sensitivity"] is not None:
+        # 保存先が変わる場合（例: 機密にした書類をクラウドからオンプレへ）はオブジェクトを移す
+        location, backend_id = storage.resolve_for_change(db, doc, data["sensitivity"])
+        try:
+            cleanup_old_storage = storage.copy_document(doc, location, backend_id)
+        except storage.StorageError as exc:
+            raise HTTPException(
+                status_code=503, detail=f"保存先を移せないため機密度を変更できません（{exc}）"
+            )
         doc.sensitivity = data["sensitivity"]
-        doc.storage_location = storage.resolve_location(doc.sensitivity)
+        doc.storage_location = location
+        doc.storage_backend_id = backend_id
     ocr_changed = "ocr_text" in data and data["ocr_text"] is not None and data["ocr_text"] != doc.ocr_text
     if ocr_changed:
         doc.ocr_text = data["ocr_text"]
@@ -417,6 +435,8 @@ def update_document(
     db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.edit))
     db.commit()
     db.refresh(doc)
+    if cleanup_old_storage is not None:
+        cleanup_old_storage()
     if ocr_changed:  # OCR を手直ししたら重要度・期限も解析し直す（手動修正済みの解析結果は保持）
         family.apply_analysis(db, doc, doc.ocr_text)
     _reindex(db, doc)
@@ -442,11 +462,11 @@ def get_page_content(
     if index < 0 or index >= max(doc.page_count, 1):
         raise HTTPException(status_code=404, detail="ページが範囲外です")
     try:
-        data = storage.get_object(doc.storage_location, f"{doc.id}/proc/{index:03d}")
+        data = storage.get_object(doc, f"{doc.id}/proc/{index:03d}")
         return Response(content=data, media_type="image/jpeg")
     except Exception:
         try:
-            data = storage.get_object(doc.storage_location, f"{doc.id}/pages/{index:03d}")
+            data = storage.get_object(doc, f"{doc.id}/pages/{index:03d}")
             return Response(content=data, media_type=_media_type(doc.file_format))
         except Exception:
             raise HTTPException(status_code=404, detail="ページ画像が見つかりません")
@@ -524,22 +544,27 @@ def create_version(
     # 新バージョンのページを新しいキー空間 v{n}/pages に保存（旧版の成果物を上書きしない）
     new_version = doc.version + 1
     fmt = (files[0].filename or "").split(".")[-1].lower() or "jpg"
-    for i, f in enumerate(files):
-        storage.put_object(
-            doc.storage_location, f"{doc.id}/v{new_version}/pages/{i:03d}",
-            f.file.read(), f.content_type or "application/octet-stream",
+    try:
+        for i, f in enumerate(files):
+            storage.put_object(
+                doc, f"{doc.id}/v{new_version}/pages/{i:03d}",
+                f.file.read(), f.content_type or "application/octet-stream",
+            )
+        # ワーカーは `{id}/pages/{i}` を読むため、新バージョンを現行ページとして配置し直す
+        pages = []
+        for i in range(len(files)):
+            pages.append(
+                storage.get_object(doc, f"{doc.id}/v{new_version}/pages/{i:03d}")
+            )
+        for i, data in enumerate(pages):
+            storage.put_object(
+                doc, f"{doc.id}/pages/{i:03d}", data, "application/octet-stream"
+            )
+        storage.put_object(doc, f"{doc.id}/mode", mode.encode(), "text/plain")
+    except storage.StorageError as exc:
+        raise HTTPException(
+            status_code=503, detail=f"保存先に書き込めませんでした。時間をおいて再送してください（{exc}）"
         )
-    # ワーカーは `{id}/pages/{i}` を読むため、新バージョンを現行ページとして配置し直す
-    pages = []
-    for i in range(len(files)):
-        pages.append(
-            storage.get_object(doc.storage_location, f"{doc.id}/v{new_version}/pages/{i:03d}")
-        )
-    for i, data in enumerate(pages):
-        storage.put_object(
-            doc.storage_location, f"{doc.id}/pages/{i:03d}", data, "application/octet-stream"
-        )
-    storage.put_object(doc.storage_location, f"{doc.id}/mode", mode.encode(), "text/plain")
 
     doc.version = new_version
     doc.page_count = len(files)
