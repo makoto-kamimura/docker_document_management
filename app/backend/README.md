@@ -31,11 +31,18 @@ uvicorn app.main:app --reload
 
 - API docs: http://localhost:8000/docs
 
+## テスト
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests      # DB は使い捨ての SQLite。外部サービス（WebDAV / Google）はモックで代替
+```
+
 ## マッピング（主要要件）
 | 要件 | 実装 |
 |---|---|
 | F-13〜F-15 OCR | services/ocr.py, workers/ocr_worker.py |
 | F-20 ハイブリッド保存 | services/storage.py |
+| F-20a 外部ストレージ連携 | services/storage_backends/, api/routes/storage.py, core/crypto.py |
 | F-23〜F-26 検索 | services/search.py, api/routes/search.py |
 | F-28〜F-30 ログ | models/access_log.py, api/routes/logs.py |
 | F-33〜F-37 認証/権限 | core/security.py, api/deps.py, api/routes/auth.py |

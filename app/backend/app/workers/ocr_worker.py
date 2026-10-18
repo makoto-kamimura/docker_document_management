@@ -44,15 +44,15 @@ def _load_pages(doc: Document) -> list[bytes]:
     pages = []
     for i in range(max(doc.page_count, 1)):
         try:
-            pages.append(storage.get_object(doc.storage_location, f"{doc.id}/pages/{i:03d}"))
-        except Exception:
-            break
+            pages.append(storage.get_object(doc, f"{doc.id}/pages/{i:03d}"))
+        except storage.StorageNotFound:
+            break  # 保存先に繋がらない等は例外のまま上げ、失敗として記録する
     return pages
 
 
 def _read_mode(doc: Document) -> str:
     try:
-        return storage.get_object(doc.storage_location, f"{doc.id}/mode").decode().strip()
+        return storage.get_object(doc, f"{doc.id}/mode").decode().strip()
     except Exception:
         return image_processing.MODE_COLOR
 
@@ -91,7 +91,7 @@ def _process_document(doc: Document) -> tuple[str, bytes, bytes, dict]:
     for i, raw in enumerate(pages):
         proc, q = image_processing.scan_page(raw, mode)
         processed.append(proc)
-        storage.put_object(doc.storage_location, f"{doc.id}/proc/{i:03d}", proc, "image/jpeg")
+        storage.put_object(doc, f"{doc.id}/proc/{i:03d}", proc, "image/jpeg")
         if i == 0:
             first_quality = q
 
@@ -161,19 +161,19 @@ def process_pending() -> None:
             # 成果物の保存（OCR成功済みのため失敗してもステータスは落とさない）
             try:
                 storage.put_object(
-                    doc.storage_location, document_pdf_key(doc), pdf_bytes, "application/pdf"
+                    doc, document_pdf_key(doc), pdf_bytes, "application/pdf"
                 )
                 if summary:
                     storage.put_object(
-                        doc.storage_location, f"{doc.id}/summary.txt",
+                        doc, f"{doc.id}/summary.txt",
                         summary.encode("utf-8"), "text/plain; charset=utf-8",
                     )
                 if preview:
                     storage.put_object(
-                        doc.storage_location, f"{doc.id}/preview.jpg", preview, "image/jpeg"
+                        doc, f"{doc.id}/preview.jpg", preview, "image/jpeg"
                     )
                 storage.put_object(
-                    doc.storage_location, f"{doc.id}/quality.json",
+                    doc, f"{doc.id}/quality.json",
                     json.dumps(quality, ensure_ascii=False).encode(), "application/json",
                 )
                 print(f"[ocr-worker] processed {doc.id} pages={quality.get('page_count')} "
