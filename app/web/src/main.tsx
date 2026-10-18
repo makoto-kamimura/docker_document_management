@@ -16,6 +16,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { UsersPage } from "./pages/UsersPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { StoragePage } from "./pages/StoragePage";
 import {
   isAuthenticated,
   clearToken,
@@ -83,6 +84,7 @@ const NAV: NavItem[] = [
   { to: "/search", icon: "🔍", label: "全文検索" },
   { to: "/users", icon: "👥", label: "ユーザー管理", adminOnly: true },
   { to: "/groups", icon: "🏷️", label: "グループ管理", adminOnly: true },
+  { to: "/storage", icon: "🗄️", label: "保存先", adminOnly: true },
   { to: "/tenants", icon: "🏛️", label: "テナント管理", superOnly: true },
 ];
 
@@ -260,6 +262,18 @@ function App() {
                   <RequireAdmin>
                     <Shell title="グループ管理" description="グループとメンバーを管理します。同じグループのメンバーはドキュメントを自動で閲覧できます">
                       <GroupsPage />
+                    </Shell>
+                  </RequireAdmin>
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/storage"
+              element={
+                <RequireAuth>
+                  <RequireAdmin>
+                    <Shell title="保存先" description="書類の画像・PDF の保存先を選びます（Cloudflare R2 / Google ドライブ / Synology NAS）">
+                      <StoragePage />
                     </Shell>
                   </RequireAdmin>
                 </RequireAuth>
