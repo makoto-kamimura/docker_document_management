@@ -9,8 +9,8 @@
 | 用途 | ソフトウェア | 確認コマンド |
 |---|---|---|
 | バックエンド/インフラ/Web | Docker Desktop | `docker --version` / `docker compose version` |
-| モバイル開発 | Node.js (18+) | `node --version` |
-| モバイル実機確認 | スマホに **Expo Go** アプリ（**Expo SDK 54** 対応版） | App Store / Google Play |
+| モバイル開発 | Node.js (20.19.4+、22 LTS 推奨) | `node --version` |
+| モバイル実機確認 | スマホに **Expo Go** アプリ（**Expo SDK 57** 対応版。iOS 16.4+ / Android 7+） | App Store / Google Play |
 
 > Docker Desktop は事前に起動しておく（デーモンが立ち上がるまで数十秒かかる）。
 > 起動確認: `docker info` がエラーなく返ること。
@@ -156,7 +156,7 @@ npm run dev                   # http://localhost:5173
 
 カメラ撮影が主機能のため、**実機 + Expo Go** での確認を推奨（iOSシミュレータ等ではカメラが使えない）。
 
-> 本アプリは **Expo SDK 54**（React Native 0.81 / React 19.1）。スマホの Expo Go が対応するSDKと一致している必要がある（不一致だと `Project is incompatible with this version of Expo Go`）。端末の Expo Go が古い場合は更新、更新できない場合はプロジェクトを端末側のSDKに合わせる。
+> 本アプリは **Expo SDK 57**（React Native 0.86 / React 19.2）。スマホの Expo Go が対応するSDKと一致している必要がある（不一致だと `Project is incompatible with this version of Expo Go`）。端末の Expo Go が古い場合は App Store / Google Play で更新する。ストアの Expo Go が SDK 57 に対応していない場合は、iOS 実機は `eas go`、Android は `npx expo start` 実行中に `a` キーで SDK 57 対応版の Expo Go を入れられる。
 
 ### 前提
 
@@ -363,6 +363,77 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 > プッシュ通知は端末が Expo Push Token を登録したときだけ送られる（[app/mobile/README.md](../../app/mobile/README.md)）。
 > 本文に書類の中身は含めない。`PUSH_ENABLED=false` で外部送信を止められる（アプリ内通知は残る）。
 
+## 4.6 書類の保存先（外部ストレージ連携） (F-20a)
+
+テナントの管理者が Web の **「保存先」**（`/storage`）で、書類の画像・PDF の保存先を選ぶ。
+使用中の保存先は**これから登録する書類**に使われ、登録済みの書類は元の保存先から読み込む。
+機密書類は「自宅内（オンプレ）」にした保存先にだけ置き、それ以外はサーバー内の MinIO に置く。
+デモテナントでは変更できない。
+
+### サーバー側の準備（最初に1回）
+
+`platform/.env`（本番は compose の environment）に暗号鍵を設定し、`backend` と `ocr-worker` の両方に渡す。
+
+```bash
+# 鍵を作る（一度決めたら変えない。変えると登録済みの保存先を復号できなくなる）
+docker compose exec backend python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+```dotenv
+STORAGE_SECRET_KEY=<上で出力された値>
+```
+
+設定後 `docker compose up -d backend ocr-worker` で反映する。未設定だと保存先画面に警告が出て登録できない。
+
+### Cloudflare R2
+
+1. Cloudflare ダッシュボード → **R2** → バケットを作成（例: `kamilog`）。
+2. **R2 → API トークンを管理** → 「API トークンを作成」。権限は **オブジェクトの読み取りと書き込み**、対象は作ったバケットだけにする。
+3. 表示された **アクセスキー ID / シークレットアクセスキー** と、R2 概要ページの **アカウント ID** を控える。
+4. Web の「保存先」→ **＋ Cloudflare R2** に入力 →「保存して接続テスト」→ 成功したら「この保存先を使う」。
+
+### Google ドライブ
+
+サーバー側で OAuth クライアントを1つ用意すれば、各テナントは自分の Google アカウントのドライブと連携できる。
+
+1. [Google Cloud コンソール](https://console.cloud.google.com/) でプロジェクトを作り、**Google Drive API** を有効にする。
+2. **OAuth 同意画面**を設定する（スコープは `.../auth/drive.file` と `openid` `email`）。公開ステータスが「テスト」の間は、テストユーザーに登録したアカウントだけが連携できる。
+3. **認証情報 → OAuth クライアント ID を作成**（種類: ウェブ アプリケーション）。承認済みのリダイレクト URI に次を登録する:
+   ```
+   https://<バックエンドのドメイン>/api/v1/storage/google/callback
+   ```
+4. `.env` に設定して再起動する:
+   ```dotenv
+   GOOGLE_OAUTH_CLIENT_ID=<クライアント ID>
+   GOOGLE_OAUTH_CLIENT_SECRET=<クライアント シークレット>
+   GOOGLE_OAUTH_REDIRECT_URI=https://<バックエンドのドメイン>/api/v1/storage/google/callback
+   WEB_BASE_URL=https://<Web のドメイン>
+   ```
+5. Web の「保存先」→ **＋ Google ドライブと連携** → Google で許可 → 保存先画面に戻り「この保存先を使う」。
+
+- ドライブには「紙ログ」フォルダができ、その下に書類ごとのフォルダが作られる。アプリは自分が作ったファイルにしか触れない（`drive.file`）。
+- 「要再連携」と表示されたら（Google 側で許可を取り消した等）、**再連携**ボタンで**同じアカウント**で許可し直す。別のアカウントでは保存済みの書類を読めないため断る。
+
+### Synology NAS（WebDAV）
+
+1. DSM の **パッケージセンター** で **WebDAV Server** をインストールし、**HTTPS を有効**にする（既定ポート 5006）。
+2. 保存用の共有フォルダ（例: `kamilog`）と、そのフォルダだけに読み書き権限を持つユーザーを作る。
+3. バックエンドから NAS に届く URL を確かめる。自宅外のサーバーから使う場合は VPN / Tailscale / DDNS + ルーターのポート開放のいずれかで 5006 に届くようにする。
+   ```bash
+   docker compose exec backend python -c "import httpx; print(httpx.request('PROPFIND', 'https://<NAS>:5006/kamilog/', auth=('<ユーザー>','<パスワード>'), headers={'Depth':'0'}, verify=False).status_code)"   # 207 なら OK
+   ```
+4. Web の「保存先」→ **＋ Synology NAS** に URL（例: `https://nas.local:5006/kamilog`）・ユーザー・パスワードを入力する。
+   - 自己署名証明書のままなら「証明書を検証する」を外す（Let's Encrypt 等の正式な証明書を推奨）。
+   - 「自宅内（オンプレ）の保存先として扱う」をオンにすると機密書類もここへ保存する。
+5. 「保存して接続テスト」→ 成功したら「この保存先を使う」。
+
+### 関連APIエンドポイント
+
+- `GET /api/v1/storage` … 保存先の一覧・使用中・サーバーの準備状況
+- `POST /api/v1/storage/backends` / `PATCH|DELETE …/{id}` / `POST …/{id}/test` … 登録・変更・削除・接続テスト
+- `PUT /api/v1/storage/active` … 使用中の保存先を切り替える（`{"backend_id": null}` で既定に戻す）
+- `GET /api/v1/storage/google/authorize` / `GET …/google/callback` … Google ドライブ連携
+
 ## 5. 全文検索・要約・メタデータ・バージョン (F-23〜F-26, F-16/F-17/F-19)
 
 ### 検索（Web「全文検索」／モバイル一覧の「🔍 検索」）
@@ -403,10 +474,14 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npx expo start --port 8082
 | `Cannot connect to the Docker daemon` | Docker Desktop が未起動。`open -a Docker` で起動し、`docker info` が通るまで待つ。 |
 | ログインで 500 / `password cannot be longer than 72 bytes` | `passlib` と新しい `bcrypt` の非互換。`app/backend/requirements.txt` で `bcrypt==4.0.1` に固定済み。発生時は `docker compose up -d --build backend` で再ビルド。 |
 | `Port 8081 is running ...` | 別のExpoが8081を使用中。`npx expo start --port 8082` のように別ポートを指定する。 |
-| 実機がExpo Goでアプリを開けない / `Project is incompatible with this version of Expo Go` | Expo Go の対応SDKがプロジェクトより古い。本プロジェクトは **Expo SDK 54**。スマホの Expo Go を App Store/Google Play で更新するか、それでも古い場合はプロジェクト側をその端末の Expo Go が対応するSDKに合わせる（`npm install expo@~54` → `npx expo install --fix`）。接続時は履歴をタップせず「Enter URL manually」で `exp://<開発機のIP>:8082` を手入力すると確実。 |
+| 実機がExpo Goでアプリを開けない / `Project is incompatible with this version of Expo Go` | Expo Go の対応SDKがプロジェクトと違う。本プロジェクトは **Expo SDK 57**。スマホの Expo Go を App Store/Google Play で更新する（ストア版が対応していなければ [3章](#3-モバイルアプリ-expo--実機) の `eas go` / `a` キーの方法で入れる）。接続時は履歴をタップせず「Enter URL manually」で `exp://<開発機のIP>:8082` を手入力すると確実。 |
 | 実機でログイン/アップロードが失敗 / 「接続先とIDをご確認ください」 | 接続先が `localhost` になっている。`localhost` は実機自身を指すため不達。`EXPO_PUBLIC_API_BASE_URL` に開発機のLAN IPを指定して `expo start`（`EXPO_PUBLIC_*` は**バンドル時に焼き込まれる**ため起動前に必須）。`app/mobile/src/api/client.ts` の既定値は本番ドメインのため、ローカル開発では必ず指定する。サーバーを複数起動していると古い `localhost` バンドルに繋がることがあるので1台に統一する。 |
 | アップロードが失敗 / バックエンドに `botocore...NoSuchBucket` | MinIO のバケット (`dms-cloud` / `dms-onprem`) 未作成。バックエンド起動時に `ensure_buckets()` で自動作成される（`app/backend/app/main.py`）。`docker compose down -v` 直後などで出たら `docker compose up -d backend` で再起動。 |
 | アップロードは成功するが一覧のOCRが「待機中」のまま進まない | OCRワーカーが起動時にクラッシュしている可能性。`docker compose logs ocr-worker` を確認。`Unknown analyzer type [kuromoji]` が出る場合は OpenSearch に kuromoji プラグインが無い。本プロジェクトは `platform/dockerfiles/opensearch.Dockerfile` で同梱済み。素のイメージに戻っていたら `docker compose build opensearch && docker compose up -d opensearch ocr-worker`。復帰後はワーカーが待機中の文書を順次処理する。 |
+| 保存先画面に「STORAGE_SECRET_KEY が設定されていない」/ OCR が失敗し、ワーカーのログに `STORAGE_SECRET_KEY が未設定` | 暗号鍵が未設定。`backend` と `ocr-worker` の**両方**に同じ `STORAGE_SECRET_KEY` を渡して再起動する（[4.6節](#46-書類の保存先外部ストレージ連携-f-20a)）。 |
+| 保存先が「接続エラー」/ アップロードが 503「保存先に書き込めませんでした」 | 保存先に届かない・認証が通らない。保存先画面のバッジにカーソルを当てると理由が出る。パスワードやキーを変えたら「編集」で入れ直す。NAS はバックエンドから URL に届くか（VPN 等）を確認。端末は送信待ちに残るので、直れば「未送信N件を同期」で再送できる。 |
+| Google ドライブが「要再連携」 | Google 側で許可が取り消された、またはリフレッシュトークンが失効した。保存先画面の「再連携」で同じアカウントで許可し直す。 |
+| Google 連携後に「連携の有効期限が切れました」 | 同意画面で10分以上経った。もう一度「Google ドライブと連携」から始める。`GOOGLE_OAUTH_REDIRECT_URI` が Google Cloud に登録した値と一致しているかも確認する。 |
 | ポート競合 (5173/8000/9000/9001/5432/9200) | `platform/.env` の各 `*_PORT` を変更して再起動。 |
 
 ---

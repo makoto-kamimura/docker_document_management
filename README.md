@@ -176,6 +176,7 @@ flowchart LR
 | お知らせ | `/notifications` | すべて | 通知の一覧、既読化、すべて既読 |
 | ユーザー管理 | `/users` | 管理者 | ユーザーの作成・ロール変更・パスワード再設定・削除 |
 | グループ管理 | `/groups` | 管理者 | グループとメンバーの管理 |
+| 保存先 | `/storage` | 管理者 | 書類の保存先（Cloudflare R2 / Google ドライブ / Synology NAS / S3 互換）の登録・接続テスト・切り替え |
 | テナント管理 | `/tenants` | 全体管理者 | テナントの作成・変更・削除、操作対象の切り替え |
 
 全体管理者には、サイドバーの下部に操作対象テナントの切り替えが表示される。
@@ -241,7 +242,21 @@ flowchart LR
 | F-17 | メタデータの付与 | 必須 | 実装済み | タイトル・カテゴリ・書類種別・タグ・機密度を編集できる |
 | F-18 | フォルダ / カテゴリの階層管理 | 必須 | 対象外 | カテゴリとタグで代替する（[決定事項](#21-決定事項) D11） |
 | F-19 | バージョン管理 | 推奨 | 実装済み | 差し替え時に現在の版を履歴に移し、版数を上げて再度 OCR する |
-| F-20 | 機密度によるハイブリッド保存 | 必須 | 実装済み | `confidential` はオンプレ側、それ以外はクラウド側。機密度を変えると保存先を判定し直す |
+| F-20 | 機密度によるハイブリッド保存 | 必須 | 実装済み | `confidential` はオンプレ側、それ以外はクラウド側。機密度を変えると保存先を判定し直し、変わる場合はファイルを移す |
+| F-20a | 外部ストレージ連携 | 推奨 | 実装済み | テナントごとに保存先を Cloudflare R2 / Google ドライブ / Synology NAS（WebDAV）/ S3 互換から選ぶ。[8.1節](#81-外部ストレージ連携) |
+
+### 8.1 外部ストレージ連携
+
+- テナントの管理者が Web の「保存先」で保存先を登録し、接続テスト（書き込み → 読み出し → 削除）に成功したものを1つ「使用中」にする。使用中の保存先は**これから登録する書類**に使い、登録済みの書類は保存した時点の保存先から読む（切り替えてもデータは移さない）。
+- 何も選ばなければ、従来どおりサーバー内の MinIO に保存する。
+- 機密書類（`confidential`）は、「自宅内（オンプレ）」として登録した保存先にだけ置く。使用中の保存先がクラウド（R2・Google ドライブ・オンプレ指定なし）なら、サーバー内の MinIO のオンプレ用バケットに置く。オンプレ指定ができるのは Synology NAS と S3 互換だけ。
+- 書類の画像・PDF はこれまでどおりバックエンドを経由して配信する。保存先の URL やトークンを端末に渡さない。
+- 保存先の認証情報（アクセスキー・パスワード・リフレッシュトークン）は暗号化して DB に保存し、API でも返さない。
+- Google ドライブは OAuth で利用者自身のドライブと連携する。権限は `drive.file`（このアプリが作ったファイルだけ）で、ドライブの「紙ログ」フォルダの下に書類ごとのフォルダを作る。再連携は同じアカウントに限る。
+- 機密度を変えたときは、今の保存先に置いたままでよければ動かさない。機密にした書類がクラウドの保存先にあるときだけ、オンプレ側（オンプレ指定の使用中の保存先、なければ MinIO のオンプレ用バケット）へ移す。
+- 書類が保存されている保存先は削除できない。
+- デモテナントでは保存先を変更できない（公開アカウントから任意の宛先へサーバーに通信させないため）。
+- 保存先に書き込めないときはアップロードを 503 で断り、モバイルは送信待ちに残して後で再送する。
 
 ## 9. 閲覧と検索
 
@@ -340,6 +355,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 | 8 | 確定事項（性能目標・機密度区分・OCR エンジン・保持期間） | 未着手 |
 | 9 | 家族での共有・通知 | 完了（プッシュの実機確認を除く） |
 | 10 | テナント分離 | 完了（テナント単位のレポートを除く） |
+| 11 | 外部ストレージ連携（R2 / Google ドライブ / Synology NAS） | 完了（実サービスでの確認を除く） |
 
 タスクごとの状態は [docs/tasks/task.md](docs/tasks/task.md) にまとめる。
 
@@ -360,7 +376,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 
 | 領域 | 技術 |
 |---|---|
-| モバイル | React Native 0.81 / Expo SDK 54 / TypeScript / expo-camera / expo-notifications |
+| モバイル | React Native 0.86 / Expo SDK 57 / React 19.2 / TypeScript / React Navigation 7 / expo-camera / expo-notifications |
 | Web | React 18 / TypeScript / Vite 5 / React Router 6 |
 | バックエンド | Python 3.12 / FastAPI / SQLAlchemy 2 / Pydantic 2 |
 | OCR・画像処理 | Tesseract（`jpn+jpn_vert+eng`、tessdata_best）/ ocrmypdf / OpenCV / Pillow |
@@ -368,7 +384,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 | 要約・PDF 出力 | Dify（未設定時は kuromoji による抽出型要約）/ reportlab |
 | データベース | PostgreSQL 16 |
 | 全文検索 | OpenSearch 2.13（kuromoji プラグイン入り） |
-| ストレージ | S3 互換（MinIO）。クラウド用とオンプレ用の2バケット |
+| ストレージ | 既定は S3 互換（MinIO）のクラウド用とオンプレ用の2バケット。テナントごとに Cloudflare R2 / Google ドライブ / WebDAV（Synology NAS）/ S3 互換を選べる |
 | 認証 | OAuth2 パスワードフロー + JWT（HS256）/ bcrypt |
 | 実行基盤 | Docker / Docker Compose |
 
@@ -381,9 +397,11 @@ flowchart LR
   API["backend<br/>(FastAPI)"] --> DB[("PostgreSQL")]
   API --> OS[("OpenSearch")]
   API --> S3[("MinIO<br/>cloud / onprem")]
+  API -.->|テナントの保存先| EXT[("R2 / Google ドライブ /<br/>Synology NAS")]
   WK["ocr-worker<br/>(ポーリング)"] --> DB
   WK --> OS
   WK --> S3
+  WK -.-> EXT
   WK -.->|プッシュ| EX["Expo Push"]
   API -.->|要約（任意）| DF["Dify"]
   WK -.->|要約（任意）| DF
@@ -392,6 +410,7 @@ flowchart LR
 - `backend` はアップロードを受けてドキュメントを `pending` で登録し、ページ画像をストレージに置く。
 - `ocr-worker` は `pending` のドキュメントを5秒ごとに取り出して処理し、10分ごとにリマインドを判定する。
 - 機密度が `confidential` のドキュメントは `dms-onprem`、それ以外は `dms-cloud` バケットに保存する（どちらも MinIO で代替している）。
+- テナントが外部の保存先を使用中なら、新しい書類はそこへ保存する（機密書類はオンプレ指定の保存先のみ。[8.1節](#81-外部ストレージ連携)）。
 
 ### 15.4 リポジトリ構成
 
@@ -441,6 +460,8 @@ docker compose up --build
 - 各環境の設定は `*.env.example` をコピーして `.env` を作成する（`.env` は `.gitignore` 済みでコミットされない）。
   - `platform/.env`（compose 用）, `app/web/.env`（Web 用）, `app/backend/.env`（API 単体起動時）。
 - 本番では `JWT_SECRET` や各データストアのパスワード、`DIFY_API_KEY` を必ず変更すること（`.env.example` の値は開発用ダミー）。
+- 外部ストレージ連携には `STORAGE_SECRET_KEY`（保存先の認証情報を暗号化する Fernet 鍵）が要る。`backend` と `ocr-worker` に同じ値を渡す。鍵を変えると登録済みの保存先は復号できなくなる。
+- Google ドライブ連携には `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI` と、連携後に戻る `WEB_BASE_URL` が要る（手順は[運用手順書](docs/runbooks/operation.md)）。
 
 ## 16. 認証の実装
 
@@ -471,7 +492,17 @@ docker compose up --build
 
 ### 17.3 保存先の振り分け
 
-`app/backend/app/services/storage.py`。`resolve_location` が、機密度 `confidential` を `onprem`、それ以外を `cloud` に割り当てる。アップロード時・差し替え時・機密度の変更時に判定する。
+`app/backend/app/services/storage.py`。書類の読み書きはすべて `put_object(doc, key, …)` / `get_object(doc, key)` を通し、保存先は書類ごとに決まる。
+
+- `resolve_target` が、新しい書類（と機密度を変えた書類）の保存先を `(storage_location, storage_backend_id)` で決める。`resolve_location` は従来どおり `confidential` を `onprem`、それ以外を `cloud` に割り当てる。テナントの使用中の保存先があればそれを使うが、機密書類はオンプレ指定の保存先に限る。
+- `storage_backend_id` が NULL の書類は環境変数の MinIO（`storage_location` でバケットを選ぶ）、値があれば登録された保存先を使う。
+- 保存先の実装は `services/storage_backends/`。共通のインターフェース（`put` / `get` / `delete` / `list` / `test`）を持つ。
+  - `s3.py`: MinIO・Cloudflare R2・S3 互換（boto3）。R2 は `https://<アカウントID>.r2.cloudflarestorage.com`、リージョン `auto`。
+  - `webdav.py`: WebDAV（httpx）。途中のフォルダは MKCOL で作り、一覧は PROPFIND（Depth: 1）でたどる。
+  - `gdrive.py`: Google ドライブ（Drive API v3 を httpx で直接呼ぶ）。各ファイルの `appProperties.dms_key` に保存キーを入れて検索する。
+- 組み立てた保存先はプロセス内に60秒キャッシュし、登録内容の `updated_at` が変わったら作り直す。認証エラーが起きたら保存先を「接続エラー」にして画面で再設定を促す。
+- 機密度を変えたときの保存先は `resolve_for_change` が決める（今の保存先に置いたままでよければ動かさない）。変わるときは書類のファイルをすべて新しい保存先へコピーし、DB を更新してから元を消す。
+- 保存先の認証情報は `core/crypto.py`（Fernet）で暗号化して `storage_backends.secret_encrypted` に置く。
 
 ### 17.4 要約
 
@@ -503,7 +534,7 @@ docker compose up --build
 `app/backend/app/db/seed.py` の `init_db`。Alembic を導入するまでの暫定の仕組み。
 
 1. `create_all` で新しいテーブルを作る。
-2. 既存のテーブルに `tenant_id` 列と `super_admin` ロールを冪等に追加する（`db/migrate.py`）。
+2. 既存のテーブルに `tenant_id` 列と `super_admin` ロール、外部ストレージ連携の `storage_backend_id` 列を冪等に追加する（`db/migrate.py`）。
 3. 実利用とデモのテナントを作り、テナント導入前のデータを実利用テナントに割り当てる。
 4. 初期アカウントを作る。
 5. NOT NULL 制約と、テナント内で一意になる制約を付ける。
@@ -516,11 +547,12 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 
 | テーブル | 主な列 | 内容 |
 |---|---|---|
-| `tenants` | `slug`（一意）, `name`, `description`, `is_demo` | データ分離の単位 |
+| `tenants` | `slug`（一意）, `name`, `description`, `is_demo`, `storage_backend_id` | データ分離の単位。`storage_backend_id` は新しい書類の保存先（NULL は既定の MinIO） |
+| `storage_backends` | `tenant_id`, `kind`（`s3` / `webdav` / `gdrive`）, `preset`, `name`, `config`, `secret_encrypted`, `is_onprem`, `last_test_ok`, `last_test_error`, `last_tested_at` | テナントが登録した外部の保存先。認証情報は暗号化して保存する |
 | `users` | `email`（一意）, `name`, `role`, `hashed_password`, `tenant_id` | `super_admin` だけ `tenant_id` が NULL |
 | `groups` | `tenant_id`, `name`, `description` | 名前はテナント内で一意 |
 | `group_members` | `group_id`, `user_id` | グループの所属 |
-| `documents` | `tenant_id`, `title`, `category`, `document_type`, `page_count`, `file_format`, `ocr_text`, `ocr_status`, `owner_id`, `sensitivity`, `storage_location`, `storage_key`, `version`, `retention_until` | ドキュメント本体のメタデータ |
+| `documents` | `tenant_id`, `title`, `category`, `document_type`, `page_count`, `file_format`, `ocr_text`, `ocr_status`, `owner_id`, `sensitivity`, `storage_location`, `storage_key`, `storage_backend_id`, `version`, `retention_until` | ドキュメント本体のメタデータ。`storage_backend_id` は保存した時点の保存先（NULL は既定の MinIO） |
 | `document_tags` | `document_id`, `tag` | タグ（多対多） |
 | `document_versions` | `document_id`, `version`, `storage_key`, `page_count`, `file_format`, `ocr_text`, `note`, `created_by` | 差し替え前の版 |
 | `document_permissions` | `document_id`, `user_id`, `level` | ドキュメント単位の権限（`view` / `edit` / `delete`） |
@@ -532,7 +564,7 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 | `notifications` | `user_id`, `tenant_id`, `document_id`, `kind`, `title`, `body`, `actor_id`, `read_at` | アプリ内通知（`new_document` / `reminder` / `renotify` / `deadline` / `comment`） |
 | `push_tokens` | `user_id`, `token`（一意）, `platform` | 端末の Expo Push Token |
 
-ページ画像・プレビュー・検索可能 PDF・要約・品質の結果はオブジェクトストレージに、検索用の本文と要約は OpenSearch に置く。
+ページ画像・プレビュー・検索可能 PDF・要約・品質の結果はオブジェクトストレージ（既定の MinIO かテナントの保存先）に、検索用の本文と要約は OpenSearch に置く。
 
 ## 19. API
 
@@ -568,6 +600,12 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 | 通知 | `POST /push-tokens`, `DELETE /push-tokens/{token}` | 端末のプッシュ登録・解除 | ログイン |
 | 検索 | `GET /search?q=&category=&document_type=&tag=` | 全文検索・絞り込み | ログイン（結果は閲覧範囲に限る） |
 | ログ | `GET /logs?document_id=&user_id=` | 閲覧履歴の照会 | 管理者 |
+| 保存先 | `GET /storage` | 保存先の一覧・使用中の保存先・サーバー側の準備状況 | 管理者 |
+| 保存先 | `POST /storage/backends`, `PATCH/DELETE /storage/backends/{id}` | 保存先の登録・変更（保存後に接続テスト）・削除（書類が無いときのみ） | 管理者（デモテナント不可） |
+| 保存先 | `POST /storage/backends/{id}/test` | 接続テスト | 管理者 |
+| 保存先 | `PUT /storage/active` | 使用中の保存先の切り替え（`null` で既定に戻す） | 管理者（デモテナント不可） |
+| 保存先 | `GET /storage/google/authorize?backend_id=` | Google の同意画面の URL（`backend_id` で再連携） | 管理者（デモテナント不可） |
+| 保存先 | `GET /storage/google/callback` | Google からの戻り先。署名付きの `state` で利用者を確かめ、Web の保存先画面へ戻す | なし（`state` で検証） |
 
 どの API も、別テナントのリソースには 404 を返す。
 
@@ -577,7 +615,7 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 |---|---|---|
 | 性能 | OCR の処理時間、検索のレスポンス、同時接続数、総件数の目標 | 数値目標は未定（Q1） |
 | セキュリティ | 通信の暗号化（TLS） | 公開デモはリバースプロキシで TLS 終端。アプリとしての実装は未着手 |
-| セキュリティ | 保存データの暗号化 | 未着手 |
+| セキュリティ | 保存データの暗号化 | 外部の保存先の認証情報は Fernet で暗号化して DB に保存する。書類のファイル自体の暗号化は未着手 |
 | セキュリティ | 機密度によるデータ配置 | 保存先の振り分けは実装済み。区分の定義と検証は未定（Q2） |
 | セキュリティ | アクセス制御 | テナント分離・ロール・ドキュメント単位の権限を実装済み |
 | セキュリティ | 監査ログの改ざん防止 | 未着手 |
@@ -607,6 +645,9 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 | D10 | 全体管理者は既定では作らず、運用者の既存アカウントを昇格させる |
 | D11 | フォルダの階層（F-18）、カテゴリ / タグのマスタ（F-39）、フォルダ単位の権限は設けず、自由入力のカテゴリとタグ、ドキュメント単位の権限で運用する |
 | D12 | スキーマは Alembic を導入するまで `create_all` と冪等な DDL で管理する。起動時の初期化はアドバイザリロックで1プロセスずつ実行する |
+| D13 | 外部ストレージはテナント単位で「メインの保存先」を置き換える方式とする（バックアップの複製ではない）。書類ごとに保存先を記録し、切り替えても登録済みの書類は移さない。Synology NAS は WebDAV で、Google ドライブは OAuth（`drive.file`）で連携する |
+| D14 | 機密書類は、オンプレ指定の保存先（Synology NAS・S3 互換で管理者が指定したもの）にだけ置く。クラウドの保存先が使用中でも、機密書類はサーバー内の MinIO に置く |
+| D15 | モバイルは Expo SDK 57 とし、Expo Go で起動できる構成を保つ（開発ビルドは必須にしない） |
 
 ## 22. 未決事項
 
