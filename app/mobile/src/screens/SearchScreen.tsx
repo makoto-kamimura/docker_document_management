@@ -9,8 +9,10 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import { searchDocuments, type SearchHit } from "../api/client";
 import { DocThumb } from "../components/DocThumb";
+import { colors, radius } from "../theme";
 
 const MATCH_LABEL: Record<string, string> = {
   ocr_text: "本文",
@@ -46,27 +48,30 @@ export function SearchScreen() {
   }
 
   return (
-    <View style={{ flex: 1, padding: 16, backgroundColor: "#f1f5f9" }}>
-      <View style={styles.bar}>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={styles.field}>
+        <Ionicons name="search" size={18} color={colors.textSubtle} />
         <TextInput
           style={styles.input}
           value={q}
           onChangeText={setQ}
-          placeholder="キーワード（本文・要約・タグ）"
+          placeholder="本文・要約・タグから探す"
+          placeholderTextColor={colors.textSubtle}
           returnKeyType="search"
+          clearButtonMode="while-editing"
+          autoCorrect={false}
           onSubmitEditing={onSearch}
         />
-        <TouchableOpacity style={styles.btn} onPress={onSearch}>
-          <Text style={styles.btnText}>検索</Text>
-        </TouchableOpacity>
       </View>
 
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color="#4f46e5" />
+        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
           data={hits}
           keyExtractor={(h) => h.id}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.row}
@@ -74,31 +79,28 @@ export function SearchScreen() {
             >
               <DocThumb id={item.id} style={styles.thumb} />
               <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                  <Text style={styles.title}>{item.title}</Text>
-                  {item.matched_in && (
-                    <Text style={styles.match}>{MATCH_LABEL[item.matched_in] ?? item.matched_in}に一致</Text>
-                  )}
-                </View>
-                {item.tags?.length > 0 && (
-                  <Text style={styles.tags}>{item.tags.map((t) => `#${t}`).join("  ")}</Text>
+                <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
+                {item.matched_in && (
+                  <Text style={styles.match}>{MATCH_LABEL[item.matched_in] ?? item.matched_in}に一致</Text>
                 )}
                 {item.snippet && (
                   <Text numberOfLines={2} style={styles.snippet}>
                     {stripTags(item.snippet)}
                   </Text>
                 )}
+                {item.tags?.length > 0 && (
+                  <Text style={styles.tags}>{item.tags.map((t) => `#${t}`).join("  ")}</Text>
+                )}
               </View>
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            searched ? (
-              <Text style={styles.empty}>一致する結果がありません。</Text>
-            ) : (
-              <Text style={styles.empty}>
-                タイトル・OCR本文・要約・タグを横断して検索します。
+            <View style={styles.empty}>
+              <Ionicons name={searched ? "document-outline" : "search-outline"} size={40} color={colors.textSubtle} />
+              <Text style={styles.emptyText}>
+                {searched ? "一致する結果がありません。" : "タイトル・OCR本文・要約・タグを横断して検索します。"}
               </Text>
-            )
+            </View>
           }
         />
       )}
@@ -107,24 +109,33 @@ export function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: "row", gap: 8, marginBottom: 12 },
-  input: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 10,
+  field: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 12,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
   },
-  btn: { backgroundColor: "#4f46e5", borderRadius: 10, paddingHorizontal: 18, justifyContent: "center" },
-  btnText: { color: "#fff", fontWeight: "700" },
-  row: { flexDirection: "row", gap: 12, backgroundColor: "#fff", padding: 14, borderRadius: 12, marginBottom: 10, alignItems: "flex-start" },
-  thumb: { width: 56, height: 72, borderRadius: 6, backgroundColor: "#e2e8f0" },
-  title: { fontSize: 15, fontWeight: "700", color: "#0f172a" },
-  match: { backgroundColor: "#ecfdf5", color: "#047857", fontSize: 11, fontWeight: "600", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: "hidden" },
-  tags: { color: "#64748b", fontSize: 12, marginTop: 4 },
-  snippet: { color: "#475569", fontSize: 13, marginTop: 6, lineHeight: 18 },
-  empty: { textAlign: "center", color: "#94a3b8", marginTop: 40, paddingHorizontal: 20, lineHeight: 20 },
+  input: { flex: 1, paddingVertical: 12, fontSize: 16, color: colors.text },
+  listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
+  row: {
+    flexDirection: "row",
+    gap: 12,
+    backgroundColor: colors.surface,
+    padding: 12,
+    borderRadius: radius.lg,
+    marginBottom: 8,
+    alignItems: "flex-start",
+  },
+  thumb: { width: 52, height: 68, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  title: { fontSize: 15, fontWeight: "700", color: colors.text },
+  match: { color: colors.success, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  snippet: { color: colors.textMuted, fontSize: 13, marginTop: 4, lineHeight: 18 },
+  tags: { color: colors.primary, fontSize: 12, marginTop: 6 },
+  empty: { alignItems: "center", marginTop: 80, gap: 10, paddingHorizontal: 32 },
+  emptyText: { textAlign: "center", color: colors.textSubtle, fontSize: 14, lineHeight: 20 },
 });

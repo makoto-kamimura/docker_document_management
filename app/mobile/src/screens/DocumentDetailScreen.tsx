@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import * as Sharing from "expo-sharing";
 import {
   downloadAuthed,
@@ -19,24 +20,34 @@ import {
 } from "../api/client";
 import { DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
 import { FamilyPanel } from "../components/FamilyPanel";
+import { colors, radius } from "../theme";
 
 // PDF出力ボタン（Web ビューアと同じ3種・同じ文言）
-const PDF_BUTTONS: { kind: PdfKind; label: string; dialogTitle: string; notReadyMsg: string }[] = [
+const PDF_BUTTONS: {
+  kind: PdfKind;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  dialogTitle: string;
+  notReadyMsg: string;
+}[] = [
   {
     kind: "document",
     label: "電子資料PDF（検索可能）を保存",
+    icon: "document-text-outline",
     dialogTitle: "電子資料PDFを保存/送信",
     notReadyMsg: "電子資料PDFはまだ生成されていません（OCR処理の完了後に自動生成されます）。",
   },
   {
     kind: "ocr",
     label: "OCRテキストPDFを保存",
+    icon: "reader-outline",
     dialogTitle: "OCRテキストPDFを保存/送信",
     notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
   },
   {
     kind: "summary",
     label: "要約PDFを出力",
+    icon: "sparkles-outline",
     dialogTitle: "要約PDFを保存/送信",
     notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
   },
@@ -45,7 +56,7 @@ const PDF_BUTTONS: { kind: PdfKind; label: string; dialogTitle: string; notReady
 // ドキュメント詳細・画像プレビュー・家族での確認・PDF出力 (F-22, F-14系)
 // 開いた時点で詳細を取得し、閲覧ログ記録・既読化を行う（Web ビューアと同じ, F-28/F-32）。
 // 通知から開いた場合はタイトルが無いので、取得した詳細のタイトルで見出しを更新する。
-export function DocumentDetailScreen({ route, navigation }: any) {
+export function DocumentDetailScreen({ route }: any) {
   const { id, title: initialTitle } = route.params as { id: string; title?: string };
   const [title, setTitle] = useState(initialTitle ?? "");
   const [familyKey, setFamilyKey] = useState(0);
@@ -65,11 +76,10 @@ export function DocumentDetailScreen({ route, navigation }: any) {
         setPageCount(Math.max(d.page_count ?? 1, 1));
         setDoc(d);
         setTitle(d.title);
-        navigation.setOptions({ title: d.title });
         setFamilyKey((k) => k + 1); // 既読になった状態で家族の確認状況を読み直す
       })
       .catch(() => setPageCount(1));
-  }, [id, navigation]);
+  }, [id]);
 
   // 指定ページの処理済み画像を取得（ページごとにキャッシュ名を分けて取り違えを防ぐ）
   const loadImage = useCallback(async (p: number) => {
@@ -117,7 +127,7 @@ export function DocumentDetailScreen({ route, navigation }: any) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
       <Text style={styles.title}>{title}</Text>
       {doc && (doc.importance === "high" || doc.deadline) && (
         <View style={styles.headChips}>
@@ -128,9 +138,12 @@ export function DocumentDetailScreen({ route, navigation }: any) {
 
       <View style={styles.imageBox}>
         {loadingImage ? (
-          <ActivityIndicator />
+          <ActivityIndicator color={colors.primary} />
         ) : imageError ? (
-          <Text style={styles.error}>{imageError}</Text>
+          <View style={{ alignItems: "center", gap: 8 }}>
+            <Ionicons name="image-outline" size={32} color={colors.textSubtle} />
+            <Text style={styles.error}>{imageError}</Text>
+          </View>
         ) : imageUri ? (
           <Image source={{ uri: imageUri }} style={styles.image} resizeMode="contain" />
         ) : null}
@@ -140,19 +153,21 @@ export function DocumentDetailScreen({ route, navigation }: any) {
       {pageCount > 1 && (
         <View style={styles.pager}>
           <TouchableOpacity
-            style={[styles.pagerBtn, page <= 0 && styles.pagerBtnDisabled]}
+            style={styles.pagerBtn}
             disabled={page <= 0}
             onPress={() => setPage((p) => Math.max(0, p - 1))}
+            accessibilityLabel="前のページ"
           >
-            <Text style={styles.pagerBtnText}>‹ 前へ</Text>
+            <Ionicons name="chevron-back" size={18} color={page <= 0 ? colors.border : colors.text} />
           </TouchableOpacity>
           <Text style={styles.pagerLabel}>{page + 1} / {pageCount}</Text>
           <TouchableOpacity
-            style={[styles.pagerBtn, page >= pageCount - 1 && styles.pagerBtnDisabled]}
+            style={styles.pagerBtn}
             disabled={page >= pageCount - 1}
             onPress={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            accessibilityLabel="次のページ"
           >
-            <Text style={styles.pagerBtnText}>次へ ›</Text>
+            <Ionicons name="chevron-forward" size={18} color={page >= pageCount - 1 ? colors.border : colors.text} />
           </TouchableOpacity>
         </View>
       )}
@@ -161,72 +176,68 @@ export function DocumentDetailScreen({ route, navigation }: any) {
       <FamilyPanel docId={id} reloadKey={familyKey} />
 
       <Text style={styles.section}>保存・共有</Text>
-      {/* 先頭（電子資料PDF）を主ボタン、残りを副ボタンで表示 */}
-      {PDF_BUTTONS.map((b, i) => {
-        const primary = i === 0;
-        return (
+      <View style={styles.card}>
+        {PDF_BUTTONS.map((b, i) => (
           <TouchableOpacity
             key={b.kind}
-            style={[styles.pdfBtn, !primary && styles.pdfBtnSecondary]}
+            style={[styles.pdfRow, i > 0 && styles.pdfRowBorder]}
             onPress={() => downloadAndShare(b)}
             disabled={busy !== null}
           >
+            <View style={styles.pdfIcon}>
+              <Ionicons name={b.icon} size={18} color={colors.primary} />
+            </View>
+            <Text style={styles.pdfLabel}>{b.label}</Text>
             {busy === b.kind ? (
-              <ActivityIndicator color={primary ? "#fff" : "#4f46e5"} />
+              <ActivityIndicator color={colors.primary} />
             ) : (
-              <Text style={[styles.pdfBtnText, !primary && styles.pdfBtnTextSecondary]}>{b.label}</Text>
+              <Ionicons name="share-outline" size={18} color={colors.textSubtle} />
             )}
           </TouchableOpacity>
-        );
-      })}
-
-      <Text style={styles.hint}>
-        複数ページはページ送りで全ページ表示できます。検索可能な電子資料PDF、OCRで認識した文字を集約したテキストPDF、要約PDFを保存/共有できます。
-      </Text>
+        ))}
+      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f1f5f9" },
-  title: { fontSize: 18, fontWeight: "700", color: "#0f172a", marginBottom: 8 },
-  headChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 12 },
-  section: { fontSize: 13, fontWeight: "700", color: "#475569", marginBottom: 6 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  title: { fontSize: 24, fontWeight: "800", color: colors.text, lineHeight: 32, marginBottom: 10 },
+  headChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 14 },
+  section: { fontSize: 13, fontWeight: "700", color: colors.textMuted, marginBottom: 8, marginTop: 4 },
   imageBox: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    minHeight: 260,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    minHeight: 280,
     alignItems: "center",
     justifyContent: "center",
     padding: 8,
-    marginBottom: 18,
+    marginBottom: 12,
+    overflow: "hidden",
   },
-  image: { width: "100%", height: 360, borderRadius: 8 },
-  error: { color: "#e11d48", fontSize: 13 },
+  image: { width: "100%", height: 380, borderRadius: radius.sm },
+  error: { color: colors.textMuted, fontSize: 13 },
   pager: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-    marginBottom: 16,
+    alignSelf: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    paddingHorizontal: 4,
+    marginBottom: 20,
   },
-  pagerBtn: { backgroundColor: "#e2e8f0", borderRadius: 8, paddingHorizontal: 16, paddingVertical: 8 },
-  pagerBtnDisabled: { opacity: 0.4 },
-  pagerBtnText: { color: "#334155", fontWeight: "700" },
-  pagerLabel: { color: "#0f172a", fontWeight: "600", minWidth: 56, textAlign: "center" },
-  pdfBtn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingVertical: 15,
+  pagerBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  pagerLabel: { color: colors.text, fontWeight: "600", fontSize: 14, minWidth: 56, textAlign: "center" },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, paddingHorizontal: 14 },
+  pdfRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 },
+  pdfRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  pdfIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
-    marginBottom: 10,
+    justifyContent: "center",
   },
-  pdfBtnSecondary: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#4f46e5",
-  },
-  pdfBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  pdfBtnTextSecondary: { color: "#4f46e5" },
-  hint: { textAlign: "center", color: "#94a3b8", fontSize: 12, marginTop: 14 },
+  pdfLabel: { flex: 1, fontSize: 15, color: colors.text },
 });

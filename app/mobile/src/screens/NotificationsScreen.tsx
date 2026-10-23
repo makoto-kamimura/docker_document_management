@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -8,13 +9,15 @@ import {
   type AppNotification,
   type NotificationKind,
 } from "../api/client";
+import { colors, radius } from "../theme";
+import { useUnread } from "../unread";
 
-const KIND_ICON: Record<NotificationKind, string> = {
-  new_document: "📄",
-  reminder: "⏰",
-  renotify: "🔔",
-  deadline: "📅",
-  comment: "💬",
+const KIND_ICON: Record<NotificationKind, keyof typeof Ionicons.glyphMap> = {
+  new_document: "document-text-outline",
+  reminder: "alarm-outline",
+  renotify: "notifications-outline",
+  deadline: "calendar-outline",
+  comment: "chatbubble-outline",
 };
 
 function ago(iso: string) {
@@ -29,6 +32,7 @@ function ago(iso: string) {
 // 家族からのお知らせ一覧（新しい紙・リマインド・再通知・期限・コメント）
 export function NotificationsScreen() {
   const navigation = useNavigation<any>();
+  const { refresh: refreshUnread } = useUnread();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -48,31 +52,43 @@ export function NotificationsScreen() {
       headerRight: () =>
         hasUnread ? (
           <TouchableOpacity
-            onPress={() => markAllNotificationsRead().then(load).catch(() => {})}
+            style={{ marginRight: 16 }}
+            onPress={() =>
+              markAllNotificationsRead()
+                .then(() => { load(); refreshUnread(); })
+                .catch(() => {})
+            }
           >
-            <Text style={{ color: "#2563eb", fontWeight: "600" }}>すべて既読</Text>
+            <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 15 }}>すべて既読</Text>
           </TouchableOpacity>
         ) : null,
     });
-  }, [navigation, hasUnread, load]);
+  }, [navigation, hasUnread, load, refreshUnread]);
 
   function open(n: AppNotification) {
     if (!n.read_at) {
-      markNotificationRead(n.id).catch(() => {});
+      markNotificationRead(n.id).then(refreshUnread).catch(() => {});
       setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)));
     }
     if (n.document_id) navigation.navigate("Detail", { id: n.document_id });
   }
 
   return (
-    <View style={{ flex: 1, padding: 16, backgroundColor: "#f1f5f9" }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <FlatList
         data={items}
         keyExtractor={(n) => n.id}
+        contentContainerStyle={styles.listContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
         renderItem={({ item }) => (
-          <TouchableOpacity style={[styles.row, !item.read_at && styles.rowUnread]} onPress={() => open(item)}>
-            <Text style={styles.icon}>{KIND_ICON[item.kind] ?? "🔔"}</Text>
+          <TouchableOpacity style={styles.row} onPress={() => open(item)}>
+            <View style={[styles.icon, !item.read_at && styles.iconUnread]}>
+              <Ionicons
+                name={KIND_ICON[item.kind] ?? "notifications-outline"}
+                size={18}
+                color={item.read_at ? colors.textMuted : colors.primary}
+              />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.title, !item.read_at && styles.titleUnread]} numberOfLines={2}>
                 {item.title}
@@ -83,20 +99,35 @@ export function NotificationsScreen() {
             {!item.read_at && <View style={styles.dot} />}
           </TouchableOpacity>
         )}
-        ListEmptyComponent={<Text style={styles.empty}>お知らせはありません。</Text>}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Ionicons name="notifications-off-outline" size={40} color={colors.textSubtle} />
+            <Text style={styles.emptyText}>お知らせはありません。</Text>
+          </View>
+        }
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", gap: 10, backgroundColor: "#fff", padding: 14, borderRadius: 12, marginBottom: 10, alignItems: "flex-start" },
-  rowUnread: { borderLeftWidth: 4, borderLeftColor: "#f59e0b" },
-  icon: { fontSize: 20 },
-  title: { fontSize: 14, color: "#0f172a" },
+  listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24, flexGrow: 1 },
+  row: {
+    flexDirection: "row",
+    gap: 12,
+    backgroundColor: colors.surface,
+    padding: 14,
+    borderRadius: radius.lg,
+    marginBottom: 8,
+    alignItems: "flex-start",
+  },
+  icon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceMuted, alignItems: "center", justifyContent: "center" },
+  iconUnread: { backgroundColor: colors.primarySoft },
+  title: { fontSize: 14, color: colors.text, lineHeight: 20 },
   titleUnread: { fontWeight: "700" },
-  body: { fontSize: 13, color: "#475569", marginTop: 3 },
-  at: { fontSize: 11, color: "#94a3b8", marginTop: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#f59e0b", marginTop: 6 },
-  empty: { textAlign: "center", color: "#94a3b8", marginTop: 40 },
+  body: { fontSize: 13, color: colors.textMuted, marginTop: 2, lineHeight: 18 },
+  at: { fontSize: 11, color: colors.textSubtle, marginTop: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary, marginTop: 6 },
+  empty: { alignItems: "center", marginTop: 80, gap: 10 },
+  emptyText: { color: colors.textSubtle, fontSize: 14 },
 });
