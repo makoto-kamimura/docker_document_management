@@ -13,7 +13,18 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { uploadDocument, type CaptureMode, type UploadPage } from "../api/client";
+import {
+  apiErrorMessage,
+  getActiveTenant,
+  getMe,
+  isTransientError,
+  listTenants,
+  setActiveTenant,
+  uploadDocument,
+  type CaptureMode,
+  type Tenant,
+  type UploadPage,
+} from "../api/client";
 import { enqueueUpload, flushQueue, pendingCount } from "../offline";
 
 const MODES: { key: CaptureMode; label: string }[] = [
@@ -31,10 +42,28 @@ export function CameraScreen() {
   const [mode, setMode] = useState<CaptureMode>("color");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(0);
+  // 全体管理者のときだけ選択肢を持つ（null = 一般ユーザー。自分のテナント固定）
+  const [tenants, setTenants] = useState<Tenant[] | null>(null);
+  const [tenant, setTenant] = useState<string | null>(getActiveTenant());
 
   useEffect(() => {
     // 起動時に未送信キューを自動再送し、残件数を表示 (F-11)
     flushQueue().then(({ remaining }) => setPending(remaining)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // 全体管理者はテナント未所属のため、登録先テナントを選ばせる（Web の TenantSwitcher と同じ）
+    getMe()
+      .then(async (u) => {
+        if (u.role !== "super_admin") return;
+        const list = await listTenants();
+        setTenants(list);
+        if (!getActiveTenant() && list.length === 1) {
+          setActiveTenant(list[0].id);
+          setTenant(list[0].id);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   if (!permission) return <View />;
@@ -94,10 +123,19 @@ export function CameraScreen() {
     setPages((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function chooseTenant(id: string) {
+    setActiveTenant(id);
+    setTenant(id);
+  }
+
   async function save(items?: UploadPage[], titleOverride?: string) {
     const target = items ?? pages;
     if (target.length === 0) {
       Alert.alert("ページがありません", "撮影またはライブラリ/PDFから追加してください。");
+      return;
+    }
+    if (tenants && !tenant) {
+      Alert.alert("登録先を選んでください", "全体管理者は登録先のテナントを選んでから保存してください。");
       return;
     }
     setBusy(true);
@@ -108,6 +146,11 @@ export function CameraScreen() {
       setPages([]);
       navigation.navigate("Documents", undefined, { pop: true });
     } catch (e) {
+      if (!isTransientError(e)) {
+        // サーバーが受け付けなかった（4xx）→ 再送しても通らないので理由を出し、ページは残す
+        Alert.alert("アップロードできませんでした", apiErrorMessage(e, "アップロードに失敗しました。"));
+        return;
+      }
       // オフライン等 → 端末に退避して後で同期 (F-11)
       try {
         await enqueueUpload(title, target, mode);
@@ -125,9 +168,11 @@ export function CameraScreen() {
   async function syncNow() {
     setBusy(true);
     try {
-      const { sent, remaining } = await flushQueue();
+      const { sent, remaining, error } = await flushQueue();
       setPending(remaining);
-      Alert.alert("同期", sent > 0 ? `${sent}件を送信しました。` : "送信できませんでした。接続を確認してください。");
+      if (sent > 0) Alert.alert("同期", `${sent}件を送信しました。`);
+      else if (error && !isTransientError(error)) Alert.alert("同期", apiErrorMessage(error, "送信できませんでした。"));
+      else Alert.alert("同期", "送信できませんでした。接続を確認してください。");
     } finally {
       setBusy(false);
     }
@@ -147,6 +192,25 @@ export function CameraScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* 登録先テナント（全体管理者のみ） */}
+      {tenants && (
+        <ScrollView horizontal style={styles.tenantBar} contentContainerStyle={styles.tenantBarContent}>
+          <Text style={styles.tenantLabel}>登録先</Text>
+          {tenants.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={[styles.modeBtn, tenant === t.id && styles.modeBtnActive]}
+              onPress={() => chooseTenant(t.id)}
+            >
+              <Text style={[styles.modeText, tenant === t.id && styles.modeTextActive]}>
+                {t.name}
+                {t.is_demo ? "（デモ）" : ""}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       <CameraView ref={cameraRef} style={{ flex: 1 }} />
 
@@ -203,6 +267,9 @@ const styles = StyleSheet.create({
   modeBtnActive: { backgroundColor: "#2563eb" },
   modeText: { color: "#94a3b8", fontWeight: "600" },
   modeTextActive: { color: "#fff" },
+  tenantBar: { flexGrow: 0, backgroundColor: "#0f172a" },
+  tenantBarContent: { alignItems: "center", gap: 8, paddingHorizontal: 12, paddingBottom: 8 },
+  tenantLabel: { color: "#94a3b8", fontSize: 12, fontWeight: "600" },
   syncBar: { backgroundColor: "#f59e0b", paddingVertical: 8, alignItems: "center" },
   syncText: { color: "#1f2937", fontWeight: "700" },
   thumbs: { maxHeight: 110, backgroundColor: "#1e293b" },

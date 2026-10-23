@@ -66,10 +66,11 @@ export async function enqueueUpload(
 }
 
 // キューを順次再送する。成功した分だけ削除し、最初の失敗で停止する。
-// 戻り値: { sent, remaining }
-export async function flushQueue(): Promise<{ sent: number; remaining: number }> {
+// 戻り値: { sent, remaining, error }（error は停止の原因。表示に使う）
+export async function flushQueue(): Promise<{ sent: number; remaining: number; error?: unknown }> {
   const items = await readQueue();
   let sent = 0;
+  let error: unknown;
   for (const item of items) {
     try {
       const pages: UploadPage[] = item.files.map((uri, i) => ({
@@ -88,14 +89,15 @@ export async function flushQueue(): Promise<{ sent: number; remaining: number }>
         }
       }
       sent += 1;
-    } catch {
+    } catch (e) {
+      error = e;
       break; // まだオフライン等。残りは次回。
     }
   }
   if (sent > 0) {
     const remaining = items.slice(sent);
     await writeQueue(remaining);
-    return { sent, remaining: remaining.length };
+    return { sent, remaining: remaining.length, error };
   }
-  return { sent: 0, remaining: items.length };
+  return { sent: 0, remaining: items.length, error };
 }

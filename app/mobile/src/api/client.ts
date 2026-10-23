@@ -13,13 +13,17 @@ export const api = axios.create({
 
 let token: string | null = null;
 let me: User | null = null;
+// 全体管理者(super_admin)が操作対象にしているテナント。一般ユーザーは自分のテナント固定のため未使用。
+let activeTenant: string | null = null;
 export function setToken(t: string) {
   token = t;
   me = null;
+  activeTenant = null;
 }
 export function clearToken() {
   token = null;
   me = null;
+  activeTenant = null;
 }
 export function isAuthenticated() {
   return !!token;
@@ -28,8 +32,17 @@ export function getToken() {
   return token;
 }
 
+export function getActiveTenant() {
+  return activeTenant;
+}
+export function setActiveTenant(tenantId: string | null) {
+  activeTenant = tenantId;
+}
+
+// JWT と（全体管理者なら）操作対象テナントを付与（Web と同じ）
 api.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (activeTenant) config.headers["X-Tenant-Id"] = activeTenant;
   return config;
 });
 
@@ -53,6 +66,11 @@ api.interceptors.response.use(
 // API エラー(FastAPI の detail)を表示用メッセージにする
 export function apiErrorMessage(e: any, fallback: string): string {
   return e?.response?.data?.detail ?? fallback;
+}
+
+// 時間をおけば通る可能性があるエラーか（応答なし=オフライン等 / 5xx）。4xx は再送しても通らない
+export function isTransientError(e: any): boolean {
+  return !e?.response || e.response.status >= 500;
 }
 
 // 認証付きでファイル(画像/PDF)を端末キャッシュへダウンロードする。
@@ -96,6 +114,18 @@ export async function getMe(): Promise<User> {
   if (me) return me;
   const { data } = await api.get<User>("/auth/me");
   me = data;
+  return data;
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  is_demo: boolean;
+}
+
+// 全体管理者は全テナント、それ以外は自分のテナントだけが返る
+export async function listTenants(): Promise<Tenant[]> {
+  const { data } = await api.get<Tenant[]>("/tenants");
   return data;
 }
 
