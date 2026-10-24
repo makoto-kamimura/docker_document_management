@@ -7,18 +7,20 @@ React Native (Expo) + TypeScript。紙資料の撮影・取り込み・閲覧を
 - expo-camera（撮影）, expo-image-manipulator（補正/最適化の足場）
 - expo-file-system（新 API の `File` / `Directory` / `Paths`。ダウンロード・オフライン退避）
 - expo-notifications / expo-constants（プッシュ通知。projectId 設定時のみ有効）
-- React Navigation 7, axios
+- React Navigation 7（下タブ: 撮影 / 書類 / 検索 / お知らせ）, @expo/vector-icons（Ionicons）, axios
 
 依存の更新は `npx expo install --fix`、確認は `npx expo-doctor@latest` で行う（Node.js 20.19.4 以上）。
 
 ## ディレクトリ
 ```
-App.tsx                    # ナビゲーション / 401時のログイン復帰 / プッシュのタップ処理
+App.tsx                    # ナビゲーション（下タブ）/ 401時のログイン復帰 / プッシュのタップ処理
 src/
 ├── api/client.ts          # APIクライアント（アップロード・家族・通知）
+├── theme.ts               # 色・角丸のトークン（Web の index.css と同じ値）
+├── unread.tsx             # 未読のお知らせ件数（タブのバッジ）
 ├── offline.ts             # オフライン撮影の退避と再送 (F-11)
 ├── push.ts                # プッシュ通知の登録（EAS projectId 設定時のみ有効）
-├── components/            # サムネイル・重要/期限バッジ・家族パネル・🔔バッジ
+├── components/            # サムネイル・重要/期限バッジ・家族パネル
 └── screens/
     ├── CameraScreen.tsx        # 撮影・アップロード (F-01, F-08, F-12)
     ├── DocumentListScreen.tsx  # 一覧（すべて/未読/重要/期限あり/既読）(F-21, F-22)
@@ -36,7 +38,7 @@ EXPO_PUBLIC_API_BASE_URL=http://<開発機のIP>:8000 npm start
 
 ## プッシュ通知の有効化（任意）
 
-未設定でも**アプリ内通知**（お知らせ一覧・🔔バッジ・再通知・リマインド）は動く。
+未設定でも**アプリ内通知**（お知らせ一覧・タブの未読バッジ・再通知・リマインド）は動く。
 実機へのプッシュ通知を使う場合のみ、以下を設定する。
 
 1. Expo (EAS) でプロジェクトを作成し、projectId を取得する

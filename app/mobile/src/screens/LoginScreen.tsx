@@ -9,8 +9,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { login, apiErrorMessage } from "../api/client";
 import { registerForPush, takePendingDocument } from "../push";
+import { colors, radius } from "../theme";
 
 // ログイン (F-33)
 export function LoginScreen({ navigation }: any) {
@@ -24,7 +26,7 @@ export function LoginScreen({ navigation }: any) {
     setBusy(true);
     try {
       await login(email.trim(), password);
-      navigation.replace("Camera");
+      navigation.replace("Main");
       registerForPush(); // EAS の projectId 設定時のみ。完了を待たない
       // ログイン前にタップしたプッシュ通知があればその書類を開く
       const pending = takePendingDocument();
@@ -41,95 +43,87 @@ export function LoginScreen({ navigation }: any) {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.card}>
-        <View style={styles.logo}>
-          <Text style={styles.logoText}>📄</Text>
-        </View>
-        <Text style={styles.title}>紙ログ</Text>
-        <Text style={styles.subtitle}>サインインして続行</Text>
-
-        {error && <Text style={styles.error}>{error}</Text>}
-
-        <Text style={styles.label}>メールアドレス</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          placeholder="you@example.com"
-        />
-
-        <Text style={styles.label}>パスワード</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          placeholder="••••••••"
-        />
-
-        <TouchableOpacity style={styles.btn} onPress={onSubmit} disabled={busy}>
-          {busy ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.btnText}>サインイン</Text>
-          )}
-        </TouchableOpacity>
+      <View style={styles.logo}>
+        <Ionicons name="document-text" size={30} color={colors.primary} />
       </View>
+      <Text style={styles.title}>紙ログ</Text>
+      <Text style={styles.subtitle}>サインインして続行</Text>
+
+      {error && (
+        <View style={styles.error}>
+          <Ionicons name="alert-circle-outline" size={16} color={colors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      <TextInput
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoComplete="email"
+        keyboardType="email-address"
+        placeholder="メールアドレス"
+        placeholderTextColor={colors.textSubtle}
+      />
+      <TextInput
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        autoComplete="password"
+        placeholder="パスワード"
+        placeholderTextColor={colors.textSubtle}
+        returnKeyType="go"
+        onSubmitEditing={onSubmit}
+      />
+
+      <TouchableOpacity style={[styles.btn, busy && { opacity: 0.7 }]} onPress={onSubmit} disabled={busy}>
+        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>サインイン</Text>}
+      </TouchableOpacity>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 24,
-    backgroundColor: "#0f172a",
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 28,
-  },
+  container: { flex: 1, justifyContent: "center", paddingHorizontal: 28, backgroundColor: colors.surface },
   logo: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: "#eef2ff",
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+    backgroundColor: colors.primarySoft,
     alignSelf: "center",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: 18,
   },
-  logoText: { fontSize: 28 },
-  title: { fontSize: 22, fontWeight: "700", textAlign: "center", color: "#0f172a" },
-  subtitle: { fontSize: 14, color: "#64748b", textAlign: "center", marginTop: 4, marginBottom: 22 },
-  label: { fontSize: 13, fontWeight: "600", color: "#0f172a", marginBottom: 6, marginTop: 12 },
+  title: { fontSize: 28, fontWeight: "800", textAlign: "center", color: colors.text },
+  subtitle: { fontSize: 15, color: colors.textMuted, textAlign: "center", marginTop: 6, marginBottom: 32 },
   input: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    backgroundColor: "#fff",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 12,
   },
   btn: {
-    backgroundColor: "#4f46e5",
-    borderRadius: 10,
-    paddingVertical: 14,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 16,
     alignItems: "center",
-    marginTop: 22,
+    marginTop: 12,
   },
-  btnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   error: {
-    backgroundColor: "#fff1f2",
-    color: "#e11d48",
-    padding: 10,
-    borderRadius: 8,
-    fontSize: 13,
-    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.dangerSoft,
+    padding: 12,
+    borderRadius: radius.md,
+    marginBottom: 16,
   },
+  errorText: { flex: 1, color: colors.danger, fontSize: 13 },
 });

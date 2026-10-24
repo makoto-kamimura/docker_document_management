@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Image, View, type ImageStyle, type StyleProp } from "react-native";
+import { Image, View, type ImageStyle, type StyleProp, type ViewStyle } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { downloadAuthed } from "../api/client";
+import { colors } from "../theme";
 
 // 一覧グリッド/検索結果のサムネイル（認証付きで /content を取得して表示）
 export function DocThumb({ id, style }: { id: string; style: StyleProp<ImageStyle> }) {
@@ -12,5 +14,11 @@ export function DocThumb({ id, style }: { id: string; style: StyleProp<ImageStyl
       .catch(() => {});
     return () => { alive = false; };
   }, [id]);
-  return uri ? <Image source={{ uri }} style={style} resizeMode="cover" /> : <View style={style} />;
+  if (uri) return <Image source={{ uri }} style={style} resizeMode="cover" />;
+  // 読み込み前・取得できないときは書類アイコンを出す
+  return (
+    <View style={[style as StyleProp<ViewStyle>, { alignItems: "center", justifyContent: "center" }]}>
+      <Ionicons name="document-outline" size={22} color={colors.textSubtle} />
+    </View>
+  );
 }
