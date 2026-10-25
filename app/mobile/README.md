@@ -21,8 +21,9 @@ src/
 ├── offline.ts             # オフライン撮影の退避と再送 (F-11)
 ├── push.ts                # プッシュ通知の登録（EAS projectId 設定時のみ有効）
 ├── components/            # サムネイル・重要/期限バッジ・家族パネル
+│   └── CaptureModal.tsx   # 撮影 → 確認（タイトル・モード・ページ）の全画面モーダル (F-01, F-06, F-08)
 └── screens/
-    ├── CameraScreen.tsx        # 撮影・アップロード (F-01, F-08, F-12)
+    ├── CameraScreen.tsx        # 撮影タブ: 撮影ボタン・写真/PDF取込・最近登録した書類 (F-01, F-12)
     ├── DocumentListScreen.tsx  # 一覧（すべて/未読/重要/期限あり/既読）(F-21, F-22)
     ├── DocumentDetailScreen.tsx# 詳細・家族の確認状況・対応・コメント・PDF出力
     ├── NotificationsScreen.tsx # お知らせ一覧

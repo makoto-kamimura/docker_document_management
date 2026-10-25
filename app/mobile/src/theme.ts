@@ -15,9 +15,6 @@ export const colors = {
   successSoft: "#f0fdf4",
   warning: "#d97706",
   warningSoft: "#fef3c7",
-  // 撮影画面（カメラの上に重ねる半透明のUI）
-  camera: "#0b0b0f",
-  overlay: "rgba(0,0,0,0.45)",
 };
 
 export const radius = { sm: 8, md: 12, lg: 16, pill: 999 };
