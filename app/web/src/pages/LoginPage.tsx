@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
+import { IoAlertCircleOutline, IoDocumentText } from "react-icons/io5";
 import { login, apiErrorMessage } from "../api/client";
 
 // ログイン (F-33)
@@ -29,11 +30,16 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="brand-mark">📄</div>
+        <div className="brand-mark"><IoDocumentText /></div>
         <h1>紙ログ</h1>
         <p className="subtitle">サインインして続行</p>
 
-        {error && <div className="login-error">{error}</div>}
+        {error && (
+          <div className="login-error">
+            <IoAlertCircleOutline />
+            {error}
+          </div>
+        )}
 
         <div className="field">
           <label htmlFor="email">メールアドレス</label>

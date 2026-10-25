@@ -7,15 +7,25 @@ import {
   type AppNotification,
   type NotificationKind,
 } from "../api/client";
+import type { IconType } from "react-icons";
+import {
+  IoAlarmOutline,
+  IoCalendarOutline,
+  IoChatbubbleOutline,
+  IoDocumentTextOutline,
+  IoNotificationsOffOutline,
+  IoNotificationsOutline,
+} from "react-icons/io5";
 import { FamilyModal } from "../components/FamilyPanel";
 import { ViewerModal } from "../components/DocViewer";
 
-const KIND_ICON: Record<NotificationKind, string> = {
-  new_document: "📄",
-  reminder: "⏰",
-  renotify: "🔔",
-  deadline: "📅",
-  comment: "💬",
+// 種類ごとのアイコン（モバイルと同じ）
+const KIND_ICON: Record<NotificationKind, IconType> = {
+  new_document: IoDocumentTextOutline,
+  reminder: IoAlarmOutline,
+  renotify: IoNotificationsOutline,
+  deadline: IoCalendarOutline,
+  comment: IoChatbubbleOutline,
 };
 
 function ago(iso: string) {
@@ -76,34 +86,40 @@ export function NotificationsPage({ onRead }: { onRead: () => void }) {
         )}
       </div>
       {error && <div className="login-error">{error}</div>}
-      <div className="card table-wrap">
-        {items.length === 0 ? (
+      {items.length === 0 ? (
+        <div className="card">
           <div className="state">
-            <div className="emoji">🔔</div>
+            <IoNotificationsOffOutline className="state-icon" />
             <h3>お知らせはありません</h3>
             <p>家族が紙を撮影すると、ここにお知らせが届きます。</p>
           </div>
-        ) : (
-          items.map((n) => (
-            <div key={n.id} className={"notif-item" + (n.read_at ? "" : " unread")} onClick={() => open(n, "family")}>
-              <div className="notif-icon">{KIND_ICON[n.kind] ?? "🔔"}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="notif-title">{n.title}</div>
-                {n.body && <div className="notif-body">{n.body}</div>}
-                <div className="notif-at">{ago(n.created_at)}</div>
+        </div>
+      ) : (
+        <div className="doc-rows">
+          {items.map((n) => {
+            const Icon = KIND_ICON[n.kind] ?? IoNotificationsOutline;
+            return (
+              <div key={n.id} className={"notif-item" + (n.read_at ? "" : " unread")} onClick={() => open(n, "family")}>
+                <div className="notif-icon"><Icon /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="notif-title">{n.title}</div>
+                  {n.body && <div className="notif-body">{n.body}</div>}
+                  <div className="notif-at">{ago(n.created_at)}</div>
+                </div>
+                {n.document_id && (
+                  <button
+                    className="btn btn-sm"
+                    onClick={(e) => { e.stopPropagation(); open(n, "viewer"); }}
+                  >
+                    紙を見る
+                  </button>
+                )}
+                {!n.read_at && <span className="notif-dot" />}
               </div>
-              {n.document_id && (
-                <button
-                  className="btn btn-sm"
-                  onClick={(e) => { e.stopPropagation(); open(n, "viewer"); }}
-                >
-                  紙を見る
-                </button>
-              )}
-            </div>
-          ))
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
       {familyDoc && <FamilyModal doc={familyDoc} onClose={() => setFamilyDoc(null)} />}
       {viewerDoc && <ViewerModal doc={viewerDoc} onClose={() => setViewerDoc(null)} />}
     </section>

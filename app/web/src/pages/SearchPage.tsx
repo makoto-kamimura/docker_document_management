@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { IoAlertCircleOutline, IoDocumentOutline, IoSearch, IoSearchOutline } from "react-icons/io5";
 import { searchDocuments, type SearchHit } from "../api/client";
 import { DocThumb, ViewerModal } from "../components/DocViewer";
 
@@ -45,13 +46,18 @@ export function SearchPage() {
 
   return (
     <section>
+      {/* アイコン入りの検索欄（モバイルと同じ）。Enter で検索 */}
       <form onSubmit={onSearch} className="search-bar">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="キーワードを入力（タイトル・OCR本文・要約・タグを横断）"
-          className="input"
-        />
+        <label className="search-field">
+          <IoSearch />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="本文・要約・タグから探す"
+            aria-label="検索キーワード"
+          />
+        </label>
         <button type="submit" className="btn btn-primary" disabled={loading}>
           {loading ? "検索中…" : "検索"}
         </button>
@@ -66,7 +72,7 @@ export function SearchPage() {
 
       {!loading && error && (
         <div className="state error">
-          <div className="emoji">⚠️</div>
+          <IoAlertCircleOutline className="state-icon" />
           <h3>検索に失敗しました</h3>
           <p>{error}</p>
         </div>
@@ -74,7 +80,7 @@ export function SearchPage() {
 
       {!loading && !error && searched && hits.length === 0 && (
         <div className="state">
-          <div className="emoji">🔍</div>
+          <IoDocumentOutline className="state-icon" />
           <h3>一致する結果がありません</h3>
           <p>別のキーワードでお試しください。</p>
         </div>
@@ -82,7 +88,7 @@ export function SearchPage() {
 
       {!loading && !error && !searched && (
         <div className="state">
-          <div className="emoji">🔍</div>
+          <IoSearchOutline className="state-icon" />
           <h3>キーワードで検索</h3>
           <p>タイトル・OCR本文・<strong>要約テキスト</strong>・タグを対象に、登録済みドキュメントを横断検索します（表記ゆれ・あいまい一致対応）。</p>
         </div>

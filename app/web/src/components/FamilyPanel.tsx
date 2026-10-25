@@ -16,25 +16,35 @@ import {
   type FamilyStatus,
   type Importance,
 } from "../api/client";
+import {
+  IoCalendarClearOutline,
+  IoCalendarOutline,
+  IoCameraOutline,
+  IoCheckmarkCircle,
+  IoNotificationsOutline,
+  IoPaperPlane,
+  IoPersonOutline,
+  IoPricetagOutline,
+} from "react-icons/io5";
 import { useMe } from "../me";
 
 function fmtDateTime(iso: string) {
   return new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-// 🔴 重要 バッジ（重要度 high のときだけ）
+// 「重要」バッジ（重要度 high のときだけ。モバイルと同じ赤い点）
 export function ImportanceBadge({ importance }: { importance: Importance | null }) {
   if (importance !== "high") return null;
-  return <span className="chip chip-important">🔴 重要</span>;
+  return <span className="chip chip-important"><span className="chip-dot" />重要</span>;
 }
 
-// 📅 期限チップ。3日以内は赤、過ぎたものは灰色（モバイルと同じ）
+// 期限チップ。3日以内は赤、過ぎたものは灰色（モバイルと同じ）
 export function DeadlineChip({ deadline }: { deadline: string | null }) {
   if (!deadline) return null;
   const left = daysUntil(deadline);
   const cls = left < 0 ? "chip-deadline past" : left <= 3 ? "chip-deadline soon" : "chip-deadline";
   const suffix = left < 0 ? "（期限切れ）" : left === 0 ? "（今日）" : left <= 3 ? `（あと${left}日）` : "";
-  return <span className={`chip ${cls}`}>📅 期限 {formatMonthDay(deadline)}{suffix}</span>;
+  return <span className={`chip ${cls}`}><IoCalendarOutline />期限 {formatMonthDay(deadline)}{suffix}</span>;
 }
 
 // 家族それぞれの状態表示: 対応状況 > 既読 > 未読（モバイルと同じ）
@@ -44,9 +54,9 @@ function memberState(m: FamilyMember): { text: string; cls: string } {
   }
   if (m.confirmed) {
     const at = m.action_at ?? m.read_at;
-    return { text: `✓ 確認済み${at ? ` ${fmtDateTime(at)}` : ""}`, cls: "state-ok" };
+    return { text: `確認済み${at ? ` ${fmtDateTime(at)}` : ""}`, cls: "state-ok" };
   }
-  return { text: "○ 未読", cls: "state-pending" };
+  return { text: "未読", cls: "state-pending" };
 }
 
 // 書類の「家族」パネル: 重要度・期限 / 自分の対応 / 家族の確認状況と再通知 / コメント
@@ -126,11 +136,11 @@ export function FamilyPanel({ docId, onChanged }: { docId: string; onChanged?: (
           <div className="chips">
             <ImportanceBadge importance={ins.importance} />
             <DeadlineChip deadline={ins.deadline} />
-            {ins.event_date && <span className="chip">🗓 日程 {formatMonthDay(ins.event_date)}</span>}
+            {ins.event_date && <span className="chip"><IoCalendarClearOutline />日程 {formatMonthDay(ins.event_date)}</span>}
             {ins.manual && <span className="chip">手動で修正済み</span>}
           </div>
-          {ins.audience && <div className="family-line">👤 対象：{ins.audience}</div>}
-          {ins.keywords.length > 0 && <div className="family-line">🏷 {ins.keywords.join("・")}</div>}
+          {ins.audience && <div className="family-line"><IoPersonOutline />対象：{ins.audience}</div>}
+          {ins.keywords.length > 0 && <div className="family-line"><IoPricetagOutline />{ins.keywords.join("・")}</div>}
         </div>
       )}
 
@@ -148,26 +158,31 @@ export function FamilyPanel({ docId, onChanged }: { docId: string; onChanged?: (
         ))}
       </div>
 
-      <div className="section-title">
-        家族の確認状況（{status.members.filter((m) => m.confirmed).length}/{status.members.length}）
-        {status.all_confirmed && <span className="state-ok">　全員確認済み</span>}
+      <div className="section-title section-title-row">
+        <span>家族の確認状況</span>
+        {status.all_confirmed ? (
+          <span className="state-ok"><IoCheckmarkCircle />全員確認済み</span>
+        ) : (
+          <span>{status.members.filter((m) => m.confirmed).length}/{status.members.length}</span>
+        )}
       </div>
       <div className="acl-list">
         {status.members.map((m) => {
           const st = memberState(m);
           return (
             <div className="acl-row" key={m.user_id}>
-              <div className="acl-user">
+              <div className="member-avatar">{m.name.trim()[0] ?? "?"}</div>
+              <div className="acl-user" style={{ flex: 1 }}>
                 <strong>
                   {m.name}
                   {m.user_id === myId ? "（あなた）" : ""}
-                  {m.is_owner ? " 📷" : ""}
+                  {m.is_owner && <IoCameraOutline className="owner-icon" title="撮影した人" />}
                 </strong>
                 <span className={st.cls}>{st.text}</span>
               </div>
               {!m.confirmed && m.user_id !== myId && (
-                <button className="btn btn-sm" onClick={() => renotify(m)} disabled={busy !== null}>
-                  もう一度通知
+                <button className="btn btn-sm btn-ping" onClick={() => renotify(m)} disabled={busy !== null}>
+                  <IoNotificationsOutline />通知
                 </button>
               )}
             </div>
@@ -199,8 +214,8 @@ export function FamilyPanel({ docId, onChanged }: { docId: string; onChanged?: (
           placeholder="家族へのメモ（例: 出欠票は提出済み）"
           maxLength={1000}
         />
-        <button type="submit" className="btn btn-primary" disabled={busy !== null || !draft.trim()}>
-          送信
+        <button type="submit" className="btn btn-primary btn-send" disabled={busy !== null || !draft.trim()} aria-label="送信" title="送信">
+          <IoPaperPlane />
         </button>
       </form>
     </div>
