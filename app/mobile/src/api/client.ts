@@ -83,7 +83,7 @@ export async function downloadAuthed(path: string, fileName: string): Promise<{ 
   const file = new File(Paths.cache, fileName);
   if (res.ok) {
     file.create({ overwrite: true });
-    file.write(new Uint8Array(await res.arrayBuffer()));
+    await file.write(new Uint8Array(await res.arrayBuffer())); // SDK 58 から非同期
   }
   return { status: res.status, uri: file.uri };
 }
@@ -238,6 +238,19 @@ export function formatMonthDay(isoDate: string): string {
   const [, m, d] = isoDate.split("-").map(Number);
   return `${m}/${d}`;
 }
+
+// 日時（ISO）→ "10/25 14:30"（端末の時刻）
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+export const OCR_LABEL: Record<string, string> = {
+  done: "完了",
+  processing: "読み取り中",
+  pending: "待機中",
+  failed: "失敗",
+};
 
 export async function getFamilyStatus(id: string): Promise<FamilyStatus> {
   const { data } = await api.get<FamilyStatus>(`/documents/${id}/family`);

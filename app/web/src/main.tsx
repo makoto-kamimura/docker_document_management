@@ -28,6 +28,19 @@ import {
   ROLE_LABEL,
   type Tenant,
 } from "./api/client";
+import type { IconType } from "react-icons";
+import {
+  IoBugOutline,
+  IoBusinessOutline,
+  IoDocumentText,
+  IoDocumentTextOutline,
+  IoLogOutOutline,
+  IoNotificationsOutline,
+  IoPeopleOutline,
+  IoPricetagsOutline,
+  IoSearchOutline,
+  IoServerOutline,
+} from "react-icons/io5";
 import { MeProvider, useMe } from "./me";
 import { UnreadProvider, useUnread } from "./unread";
 import "./index.css";
@@ -71,7 +84,7 @@ function RequireSuperAdmin({ children }: { children: React.ReactNode }) {
 
 interface NavItem {
   to: string;
-  icon: string;
+  icon: IconType;
   label: string;
   badge?: boolean;
   adminOnly?: boolean;   // テナント管理者 or 全体管理者
@@ -79,13 +92,13 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { to: "/documents", icon: "🗂️", label: "ドキュメント一覧" },
-  { to: "/notifications", icon: "🔔", label: "お知らせ", badge: true },
-  { to: "/search", icon: "🔍", label: "全文検索" },
-  { to: "/users", icon: "👥", label: "ユーザー管理", adminOnly: true },
-  { to: "/groups", icon: "🏷️", label: "グループ管理", adminOnly: true },
-  { to: "/storage", icon: "🗄️", label: "保存先", adminOnly: true },
-  { to: "/tenants", icon: "🏛️", label: "テナント管理", superOnly: true },
+  { to: "/documents", icon: IoDocumentTextOutline, label: "ドキュメント一覧" },
+  { to: "/notifications", icon: IoNotificationsOutline, label: "お知らせ", badge: true },
+  { to: "/search", icon: IoSearchOutline, label: "全文検索" },
+  { to: "/users", icon: IoPeopleOutline, label: "ユーザー管理", adminOnly: true },
+  { to: "/groups", icon: IoPricetagsOutline, label: "グループ管理", adminOnly: true },
+  { to: "/storage", icon: IoServerOutline, label: "保存先", adminOnly: true },
+  { to: "/tenants", icon: IoBusinessOutline, label: "テナント管理", superOnly: true },
 ];
 
 /** 全体管理者が操作対象のテナントを切り替えるセレクタ。切替後はデータを取り直すため再読込する。 */
@@ -134,7 +147,7 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">📄</div>
+        <div className="brand-mark"><IoDocumentText /></div>
         <div className="brand-text">
           <strong>紙ログ</strong>
           <span>Document Management</span>
@@ -142,17 +155,20 @@ function Sidebar() {
       </div>
 
       <nav className="nav">
-        {nav.map((n) => (
-          <NavLink
-            key={n.to}
-            to={n.to}
-            className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
-          >
-            <span className="icon">{n.icon}</span>
-            {n.label}
-            {n.badge && unread > 0 && <span className="nav-badge">{unread > 99 ? "99+" : unread}</span>}
-          </NavLink>
-        ))}
+        {nav.map((n) => {
+          const Icon = n.icon;
+          return (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) => "nav-item" + (isActive ? " active" : "")}
+            >
+              <span className="icon"><Icon /></span>
+              {n.label}
+              {n.badge && unread > 0 && <span className="nav-badge">{unread > 99 ? "99+" : unread}</span>}
+            </NavLink>
+          );
+        })}
       </nav>
 
       <div className="sidebar-footer">
@@ -163,7 +179,7 @@ function Sidebar() {
           rel="noopener noreferrer"
           className="nav-item"
         >
-          <span className="icon">🐛</span>
+          <span className="icon"><IoBugOutline /></span>
           バグ報告
         </a>
         <div className="user-chip">
@@ -174,6 +190,7 @@ function Sidebar() {
           </div>
         </div>
         <button className="btn-logout" onClick={logout}>
+          <IoLogOutOutline />
           ログアウト
         </button>
       </div>

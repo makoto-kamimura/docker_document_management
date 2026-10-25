@@ -12,6 +12,7 @@ import {
   type GroupMember,
   type User,
 } from "../api/client";
+import { IoPeopleOutline } from "react-icons/io5";
 
 // グループのマスタ管理 (F-36 自動共有の単位)
 export function GroupsPage() {
@@ -84,7 +85,7 @@ export function GroupsPage() {
       <div className="card table-wrap">
         {groups.length === 0 ? (
           <div className="state">
-            <div className="emoji">👥</div>
+            <IoPeopleOutline className="state-icon" />
             <h3>グループがありません</h3>
             <p>上のフォームからグループを作成し、メンバーを追加してください。</p>
           </div>

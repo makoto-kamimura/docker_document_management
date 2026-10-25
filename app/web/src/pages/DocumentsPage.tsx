@@ -18,6 +18,17 @@ import {
   type User,
   type PermissionLevel,
 } from "../api/client";
+import {
+  IoAlertCircleOutline,
+  IoChevronForward,
+  IoCreateOutline,
+  IoFileTrayOutline,
+  IoGridOutline,
+  IoListOutline,
+  IoLockClosedOutline,
+  IoPeopleOutline,
+  IoTimeOutline,
+} from "react-icons/io5";
 import { DocThumb, ViewerModal } from "../components/DocViewer";
 import { DeadlineChip, FamilyModal, ImportanceBadge } from "../components/FamilyPanel";
 import { useMe } from "../me";
@@ -39,8 +50,8 @@ type Filter = "all" | "unread" | "important" | "deadline" | "read";
 const FILTERS: { key: Filter; label: string; match: (d: DocumentRead) => boolean }[] = [
   { key: "all", label: "すべて", match: () => true },
   { key: "unread", label: "未読", match: (d) => !d.is_read },
-  { key: "important", label: "🔴 重要", match: (d) => d.importance === "high" },
-  { key: "deadline", label: "📅 期限あり", match: (d) => !!d.deadline },
+  { key: "important", label: "重要", match: (d) => d.importance === "high" },
+  { key: "deadline", label: "期限あり", match: (d) => !!d.deadline },
   { key: "read", label: "既読", match: (d) => d.is_read },
 ];
 
@@ -84,7 +95,7 @@ export function DocumentsPage() {
   if (error) {
     return (
       <div className="state error">
-        <div className="emoji">⚠️</div>
+        <IoAlertCircleOutline className="state-icon" />
         <h3>読み込みに失敗しました</h3>
         <p>{error}</p>
       </div>
@@ -97,126 +108,115 @@ export function DocumentsPage() {
 
   return (
     <section>
-      {/* 未読/重要/期限 と リスト/サムネイル の切替タブ */}
+      {/* 未読/重要/期限 のフィルタ と リスト/サムネイル の切替（モバイルと同じ） */}
       <div className="listbar">
-        <div className="seg">
+        <div className="filter-chips">
           {FILTERS.map((f) => {
             const n = countOf(f);
             return (
-              <button key={f.key} className={"seg-btn" + (filter === f.key ? " active" : "")} onClick={() => setFilter(f.key)}>
-                {f.label}{n ? ` (${n})` : ""}
+              <button
+                key={f.key}
+                className={"filter-chip" + (filter === f.key ? " active" : "")}
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+                {n > 0 && <span className="filter-count">{n}</span>}
               </button>
             );
           })}
         </div>
         <div style={{ flex: 1 }} />
-        <div className="seg">
-          <button className={"seg-btn" + (view === "list" ? " active" : "")} onClick={() => setView("list")}>≣ リスト</button>
-          <button className={"seg-btn" + (view === "grid" ? " active" : "")} onClick={() => setView("grid")}>▦ サムネイル</button>
-        </div>
+        <button
+          className="icon-btn"
+          onClick={() => setView(view === "list" ? "grid" : "list")}
+          title={view === "list" ? "サムネイル表示" : "リスト表示"}
+          aria-label={view === "list" ? "サムネイル表示" : "リスト表示"}
+        >
+          {view === "list" ? <IoGridOutline /> : <IoListOutline />}
+        </button>
       </div>
 
       {docs.length === 0 ? (
-        <div className="card table-wrap">
+        <div className="card">
           <div className="state">
-            <div className="emoji">🗂️</div>
+            <IoFileTrayOutline className="state-icon" />
             <h3>ドキュメントがありません</h3>
             <p>モバイルアプリで紙資料を撮影・取り込みすると、ここに一覧表示されます。</p>
           </div>
         </div>
+      ) : shown.length === 0 ? (
+        <div className="state">
+          <IoFileTrayOutline className="state-icon" />
+          <p>該当する紙がありません。</p>
+        </div>
       ) : view === "grid" ? (
         <div className="thumb-grid">
           {shown.map((d) => (
-            <div key={d.id} className="thumb-card" title={d.title} onClick={() => setViewerDoc(d)} style={{ cursor: "pointer" }}>
+            <div key={d.id} className="thumb-card" title={d.title} onClick={() => setViewerDoc(d)}>
               <DocThumb id={d.id} />
               {!d.is_read && <span className="thumb-unread" />}
-              {d.importance === "high" && <span className="thumb-important">🔴 重要</span>}
-              <div className="thumb-cap">{d.title}</div>
+              {d.importance === "high" && (
+                <span className="thumb-important">
+                  <ImportanceBadge importance={d.importance} />
+                </span>
+              )}
+              <div className={"thumb-cap" + (d.is_read ? "" : " unread")}>{d.title}</div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="card table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>タイトル</th>
-                <th>状態</th>
-                <th>家族</th>
-                <th>OCR</th>
-                <th>保存先</th>
-                <th>登録日時</th>
-                <th style={{ textAlign: "right" }}>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((d) => (
-                <tr key={d.id}>
-                  <td className="cell-title">
-                    {d.title}
+        <div className="doc-rows">
+          {shown.map((d) => (
+            // 行をクリックするとビューア。右のボタンは家族・対応と（管理者・所有者のみ）編集・履歴・権限
+            <div key={d.id} className={"doc-row" + (d.is_read ? "" : " unread")} onClick={() => setViewerDoc(d)}>
+              <div className="doc-row-thumb">
+                <DocThumb id={d.id} />
+                {!d.is_read && <span className="doc-row-unread" />}
+              </div>
+              <div className="doc-row-body">
+                <div className="doc-row-title">{d.title}</div>
+                {(d.category || d.tags?.length > 0 || d.importance === "high" || d.deadline) && (
+                  <div className="chips doc-row-chips">
+                    <ImportanceBadge importance={d.importance} />
+                    <DeadlineChip deadline={d.deadline} />
                     {d.category && <span className="chip chip-cat">{d.category}</span>}
                     {d.tags?.map((t) => (
                       <span key={t} className="chip">#{t}</span>
                     ))}
-                    {(d.importance === "high" || d.deadline) && (
-                      <div className="chips" style={{ marginTop: 6 }}>
-                        <ImportanceBadge importance={d.importance} />
-                        <DeadlineChip deadline={d.deadline} />
-                      </div>
-                    )}
-                  </td>
-                  <td>
-                    {d.is_read ? (
-                      <span className="badge badge-read">既読</span>
-                    ) : (
-                      <span className="badge badge-unread">未読</span>
-                    )}
-                  </td>
-                  <td>
-                    {d.family_total > 1 ? (
-                      <span className={"family-count" + (d.family_confirmed < d.family_total ? " pending" : "")}>
-                        {d.family_confirmed}/{d.family_total} 確認
-                      </span>
-                    ) : (
-                      <span className="family-count">—</span>
-                    )}
-                  </td>
-                  <td>
-                    <OcrBadge status={d.ocr_status} />
-                  </td>
-                  <td>
-                    <span className="badge badge-neutral">
-                      {d.storage_location === "onprem" ? "オンプレ" : "クラウド"}
+                  </div>
+                )}
+                <div className="doc-row-meta">
+                  {d.family_total > 1 && (
+                    <span className={"family-count" + (d.family_confirmed < d.family_total ? " pending" : "")}>
+                      家族 {d.family_confirmed}/{d.family_total} 確認
                     </span>
-                  </td>
-                  <td style={{ color: "var(--text-muted)" }}>
-                    {new Date(d.created_at).toLocaleString("ja-JP")}
-                  </td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button className="btn btn-sm" onClick={() => setViewerDoc(d)}>
-                      閲覧
+                  )}
+                  {d.ocr_status !== "done" && <OcrBadge status={d.ocr_status} />}
+                  <span>{d.storage_location === "onprem" ? "オンプレ" : "クラウド"}</span>
+                  <span>{new Date(d.created_at).toLocaleString("ja-JP")}</span>
+                </div>
+              </div>
+              <div className="doc-row-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="icon-btn" onClick={() => setFamilyDoc(d)} title="家族・対応" aria-label="家族・対応">
+                  <IoPeopleOutline />
+                </button>
+                {canManage(d) && (
+                  <>
+                    <button className="icon-btn" onClick={() => setEditDoc(d)} title="編集" aria-label="編集">
+                      <IoCreateOutline />
                     </button>
-                    <button className="btn btn-sm" onClick={() => setFamilyDoc(d)}>
-                      家族・対応
+                    <button className="icon-btn" onClick={() => setVersionsDoc(d)} title="履歴" aria-label="履歴">
+                      <IoTimeOutline />
                     </button>
-                    {canManage(d) && (
-                      <>
-                        <button className="btn btn-sm" onClick={() => setEditDoc(d)}>
-                          編集
-                        </button>
-                        <button className="btn btn-sm" onClick={() => setVersionsDoc(d)}>
-                          履歴
-                        </button>
-                        <button className="btn btn-sm" onClick={() => setAclDoc(d)}>
-                          権限設定
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <button className="icon-btn" onClick={() => setAclDoc(d)} title="権限設定" aria-label="権限設定">
+                      <IoLockClosedOutline />
+                    </button>
+                  </>
+                )}
+              </div>
+              <IoChevronForward className="doc-row-chevron" />
+            </div>
+          ))}
         </div>
       )}
 

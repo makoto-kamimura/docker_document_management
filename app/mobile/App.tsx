@@ -58,16 +58,7 @@ function MainTabs() {
       <Tab.Screen
         name="Camera"
         component={CameraScreen}
-        options={{
-          title: "撮影",
-          headerShown: false,
-          tabBarIcon: tabIcon("camera"),
-          // カメラの上では暗いタブバーにする
-          tabBarActiveTintColor: "#fff",
-          tabBarInactiveTintColor: "rgba(255,255,255,0.5)",
-          tabBarStyle: { backgroundColor: colors.camera, borderTopColor: "transparent" },
-          sceneStyle: { backgroundColor: colors.camera },
-        }}
+        options={{ title: "撮影", tabBarIcon: tabIcon("camera") }}
       />
       <Tab.Screen
         name="Documents"

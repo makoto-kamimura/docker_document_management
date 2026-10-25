@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -11,45 +10,47 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import {
   apiErrorMessage,
+  formatDateTime,
   getActiveTenant,
   getMe,
   isTransientError,
+  listDocuments,
   listTenants,
+  OCR_LABEL,
   setActiveTenant,
   uploadDocument,
   type CaptureMode,
+  type DocumentRead,
   type Tenant,
   type UploadPage,
 } from "../api/client";
+import { CaptureModal, type CaptureStep } from "../components/CaptureModal";
+import { DocThumb } from "../components/DocThumb";
 import { enqueueUpload, flushQueue, pendingCount } from "../offline";
 import { colors, radius } from "../theme";
 
-const MODES: { key: CaptureMode; label: string }[] = [
-  { key: "color", label: "カラー" },
-  { key: "gray", label: "グレー" },
-  { key: "bw", label: "白黒" },
-];
+const RECENT_COUNT = 5;
 
-// 撮影・取り込み (F-01/F-02/F-06/F-08/F-09/F-10/F-11)
+// 撮影タブの最初の画面（ストクルのスキャン画面と同じく、ボタンを押してからカメラを開く）。
+// 撮影・取込 (F-01/F-02/F-10/F-11) と、自分が最近登録した書類の一覧
 export function CameraScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
-  // 別のタブにいる間はカメラを止める
-  const focused = useIsFocused();
-  const cameraRef = useRef<CameraView>(null);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [pages, setPages] = useState<UploadPage[]>([]);
-  const [mode, setMode] = useState<CaptureMode>("color");
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(0);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [recent, setRecent] = useState<DocumentRead[] | null>(null);
+  // 開いている撮影モーダル（null = 閉じている）
+  const [capture, setCapture] = useState<{ pages: UploadPage[]; step: CaptureStep } | null>(null);
+  // 登録後に画面の上へ出すお知らせ
+  const [notice, setNotice] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
   // 全体管理者のときだけ選択肢を持つ（null = 一般ユーザー。自分のテナント固定）
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [tenant, setTenant] = useState<string | null>(getActiveTenant());
@@ -61,9 +62,10 @@ export function CameraScreen() {
   }, []);
 
   useEffect(() => {
-    // 全体管理者はテナント未所属のため、登録先テナントを選ばせる（Web の TenantSwitcher と同じ）
     getMe()
       .then(async (u) => {
+        setMyId(u.id);
+        // 全体管理者はテナント未所属のため、登録先テナントを選ばせる（Web の TenantSwitcher と同じ）
         if (u.role !== "super_admin") return;
         const list = await listTenants();
         setTenants(list);
@@ -72,74 +74,30 @@ export function CameraScreen() {
           setTenant(list[0].id);
         }
       })
-      .catch(() => {});
+      .catch(() => setRecent([]));
   }, []);
 
-  if (!permission) return <View style={styles.root} />;
-  if (!permission.granted) {
-    return (
-      <View style={[styles.root, styles.center]}>
-        <Ionicons name="camera-outline" size={44} color="rgba(255,255,255,0.6)" />
-        <Text style={styles.permTitle}>カメラの利用許可が必要です</Text>
-        <Text style={styles.permText}>紙の資料を撮影するためにカメラを使います。</Text>
-        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>許可する</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // 自分が登録した書類を新しい順に（一覧 API は created_at の降順）
+  const loadRecent = useCallback(() => {
+    if (!myId) return;
+    listDocuments()
+      .then((docs) => setRecent(docs.filter((d) => d.owner_id === myId).slice(0, RECENT_COUNT)))
+      .catch(() => setRecent((prev) => prev ?? []));
+  }, [myId]);
 
-  async function capture() {
-    if (!cameraRef.current) return;
-    const photo = await cameraRef.current.takePictureAsync();
-    if (!photo) return;
-    // 画質チェック: 低解像度を警告 (F-09)
-    if (photo.width && Math.min(photo.width, photo.height) < 1000) {
-      Alert.alert("低解像度の可能性", "解像度が低い可能性があります。明るい場所で近づいて再撮影すると精度が上がります。");
-    }
-    setPages((prev) => [...prev, { uri: photo.uri, type: "image/jpeg" }]);
-  }
+  useFocusEffect(loadRecent);
 
-  async function pickFromLibrary() {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsMultipleSelection: true,
-      quality: 1,
-    });
-    if (!res.canceled) {
-      const added = res.assets.map((a) => ({ uri: a.uri, type: a.mimeType ?? "image/jpeg" }));
-      setPages((prev) => [...prev, ...added]);
-    }
-  }
-
-  async function pickPdf() {
-    // ピッカーを閉じた直後はシートを出せないため、登録先は先に確認する
-    if (needTenant()) return;
-    const res = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true });
-    if (res.canceled || !res.assets?.[0]) return;
-    const f = res.assets[0];
-    // PDFは単独で1ドキュメントとしてアップロード
-    await save([{ uri: f.uri, name: f.name ?? "document.pdf", type: "application/pdf" }], `取込_${Date.now()}`);
-  }
-
-  function movePage(index: number, dir: -1 | 1) {
-    setPages((prev) => {
-      const next = [...prev];
-      const j = index + dir;
-      if (j < 0 || j >= next.length) return prev;
-      [next[index], next[j]] = [next[j], next[index]];
-      return next;
-    });
-  }
-
-  function removePage(index: number) {
-    setPages((prev) => prev.filter((_, i) => i !== index));
-  }
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   function chooseTenant(id: string) {
     setActiveTenant(id);
     setTenant(id);
     setPicking(false);
+    loadRecent();
   }
 
   // 全体管理者で登録先が未選択なら、選択シートを開いて true を返す
@@ -151,37 +109,58 @@ export function CameraScreen() {
     return false;
   }
 
-  async function save(items?: UploadPage[], titleOverride?: string) {
-    const target = items ?? pages;
-    if (target.length === 0) {
-      Alert.alert("ページがありません", "撮影またはライブラリ/PDFから追加してください。");
-      return;
-    }
+  function openCamera() {
     if (needTenant()) return;
-    setBusy(true);
-    const title = titleOverride ?? `資料_${Date.now()}`;
+    setCapture({ pages: [], step: "camera" });
+  }
+
+  // ピッカーはモーダルの上では開かず、この画面から開いて確認画面に渡す
+  async function pickFromLibrary() {
+    if (needTenant()) return;
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+    if (!res.canceled && res.assets.length > 0) {
+      const pages = res.assets.map((a) => ({ uri: a.uri, type: a.mimeType ?? "image/jpeg" }));
+      setCapture({ pages, step: "review" });
+    }
+  }
+
+  async function pickPdf() {
+    if (needTenant()) return;
+    const res = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true });
+    if (res.canceled || !res.assets?.[0]) return;
+    const f = res.assets[0];
+    // PDFは単独で1ドキュメントとしてアップロード
+    setCapture({ pages: [{ uri: f.uri, name: f.name ?? "document.pdf", type: "application/pdf" }], step: "review" });
+  }
+
+  async function submit(title: string, pages: UploadPage[], mode: CaptureMode) {
+    const pdf = pages.some((p) => p.type === "application/pdf");
+    // 空欄は自動命名にする。OCR の後に本文の見出しで置き換わる（backend analyze.py の AUTO_TITLE_RE）
+    const finalTitle = title.trim() || `${pdf ? "取込" : "資料"}_${Date.now()}`;
     try {
-      await uploadDocument(title, target, mode);
-      Alert.alert("アップロード完了", "文字の読み取りを始めました。読み取りが終わると家族にお知らせします。");
-      setPages([]);
-      navigation.navigate("Documents");
+      await uploadDocument(finalTitle, pages, mode);
+      setCapture(null);
+      setNotice({ text: "登録しました。文字の読み取りが終わると家族にお知らせします。", tone: "ok" });
+      loadRecent();
     } catch (e) {
       if (!isTransientError(e)) {
-        // サーバーが受け付けなかった（4xx）→ 再送しても通らないので理由を出し、ページは残す
+        // サーバーが受け付けなかった（4xx）→ 再送しても通らないので理由を出し、確認画面に残す
         Alert.alert("アップロードできませんでした", apiErrorMessage(e, "アップロードに失敗しました。"));
         return;
       }
       // オフライン等 → 端末に退避して後で同期 (F-11)
       try {
-        await enqueueUpload(title, target, mode);
+        await enqueueUpload(finalTitle, pages, mode);
         setPending(await pendingCount());
-        setPages([]);
-        Alert.alert("オフライン保存", "通信できないため端末に保存しました。接続後に自動送信します。");
+        setCapture(null);
+        setNotice({ text: "通信できないため端末に保存しました。接続後に自動送信します。", tone: "warn" });
       } catch {
         Alert.alert("エラー", "アップロードに失敗しました。");
       }
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -190,8 +169,10 @@ export function CameraScreen() {
     try {
       const { sent, remaining, error } = await flushQueue();
       setPending(remaining);
-      if (sent > 0) Alert.alert("同期", `${sent}件を送信しました。`);
-      else if (error && !isTransientError(error)) Alert.alert("同期", apiErrorMessage(error, "送信できませんでした。"));
+      if (sent > 0) {
+        Alert.alert("同期", `${sent}件を送信しました。`);
+        loadRecent();
+      } else if (error && !isTransientError(error)) Alert.alert("同期", apiErrorMessage(error, "送信できませんでした。"));
       else Alert.alert("同期", "送信できませんでした。接続を確認してください。");
     } finally {
       setBusy(false);
@@ -201,94 +182,108 @@ export function CameraScreen() {
   const tenantName = tenants?.find((t) => t.id === tenant)?.name;
 
   return (
-    <View style={styles.root}>
-      {focused && <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />}
-
-      {/* 上: モード (F-06) / 登録先（全体管理者のみ） / 未送信 (F-11) */}
-      <View style={[styles.top, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.segment}>
-          {MODES.map((m) => (
-            <TouchableOpacity
-              key={m.key}
-              style={[styles.segBtn, mode === m.key && styles.segBtnActive]}
-              onPress={() => setMode(m.key)}
-            >
-              <Text style={[styles.segText, mode === m.key && styles.segTextActive]}>{m.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {(tenants || pending > 0) && (
-          <View style={styles.pills}>
-            {tenants && (
-              <TouchableOpacity style={styles.pill} onPress={() => setPicking(true)}>
-                <Ionicons name="business-outline" size={14} color="#fff" />
-                <Text style={styles.pillText} numberOfLines={1}>{tenantName ?? "登録先を選択"}</Text>
-                <Ionicons name="chevron-down" size={14} color="#fff" />
-              </TouchableOpacity>
-            )}
-            {pending > 0 && (
-              <TouchableOpacity style={[styles.pill, styles.pillWarn]} onPress={syncNow} disabled={busy}>
-                <Ionicons name="cloud-upload-outline" size={15} color={colors.text} />
-                <Text style={[styles.pillText, { color: colors.text }]}>未送信 {pending}件・同期</Text>
-              </TouchableOpacity>
-            )}
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        {notice && (
+          <View style={[styles.notice, notice.tone === "warn" && styles.noticeWarn]}>
+            <Ionicons
+              name={notice.tone === "ok" ? "checkmark-circle" : "cloud-offline-outline"}
+              size={18}
+              color={notice.tone === "ok" ? colors.success : colors.warning}
+            />
+            <Text style={[styles.noticeText, notice.tone === "warn" && { color: colors.warning }]}>{notice.text}</Text>
           </View>
         )}
-      </View>
 
-      {busy && pages.length === 0 && (
-        <View style={styles.busy}>
-          <ActivityIndicator color="#fff" size="large" />
-        </View>
-      )}
-
-      {/* 下: ページ (F-02/F-08) / 保存 / 操作 */}
-      <View style={styles.bottom}>
-        {pages.length > 0 && (
-          <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
-              {pages.map((p, i) => (
-                <View key={`${p.uri}_${i}`} style={styles.thumbWrap}>
-                  <Image source={{ uri: p.uri }} style={styles.thumb} />
-                  <Text style={styles.thumbIdx}>{i + 1}</Text>
-                  <TouchableOpacity style={styles.thumbDel} onPress={() => removePage(i)} hitSlop={8} accessibilityLabel="削除">
-                    <Ionicons name="close" size={12} color="#fff" />
-                  </TouchableOpacity>
-                  <View style={styles.thumbMove}>
-                    <TouchableOpacity onPress={() => movePage(i, -1)} hitSlop={6} accessibilityLabel="前へ">
-                      <Ionicons name="chevron-back" size={14} color="rgba(255,255,255,0.8)" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => movePage(i, 1)} hitSlop={6} accessibilityLabel="後ろへ">
-                      <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.8)" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={[styles.save, busy && { opacity: 0.7 }]} onPress={() => save()} disabled={busy}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>保存 · {pages.length}ページ</Text>}
-            </TouchableOpacity>
-          </>
+        {pending > 0 && (
+          <TouchableOpacity style={styles.pending} onPress={syncNow} disabled={busy}>
+            <Ionicons name="cloud-upload-outline" size={18} color={colors.warning} />
+            <Text style={styles.pendingText}>未送信 {pending}件</Text>
+            {busy ? <ActivityIndicator color={colors.warning} /> : <Text style={styles.pendingAction}>同期する</Text>}
+          </TouchableOpacity>
         )}
 
-        <View style={styles.controls}>
-          <TouchableOpacity style={styles.side} onPress={pickFromLibrary} disabled={busy}>
-            <View style={styles.sideIcon}>
-              <Ionicons name="images-outline" size={22} color="#fff" />
-            </View>
-            <Text style={styles.sideText}>ライブラリ</Text>
+        {tenants && (
+          <TouchableOpacity style={styles.tenant} onPress={() => setPicking(true)}>
+            <Ionicons name="business-outline" size={18} color={colors.textMuted} />
+            <Text style={styles.tenantLabel}>登録先</Text>
+            <Text style={[styles.tenantName, !tenantName && { color: colors.textSubtle }]} numberOfLines={1}>
+              {tenantName ?? "選択してください"}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color={colors.textSubtle} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.shutter} onPress={capture} disabled={busy} accessibilityLabel="撮影">
-            <View style={styles.shutterInner} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.side} onPress={pickPdf} disabled={busy}>
-            <View style={styles.sideIcon}>
-              <Ionicons name="document-attach-outline" size={22} color="#fff" />
-            </View>
-            <Text style={styles.sideText}>PDF</Text>
+        )}
+
+        {/* ボタンを押してからカメラを開く（ストクルと同じ） */}
+        <View style={styles.hero}>
+          <View style={styles.ring}>
+            <Pressable
+              onPress={openCamera}
+              accessibilityRole="button"
+              accessibilityLabel="撮影する"
+              style={({ pressed }) => [styles.bigBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] }]}
+            >
+              <Ionicons name="camera" size={40} color="#fff" />
+              <Text style={styles.bigBtnText}>撮影する</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.heroHint}>ボタンを押すとカメラが起動します</Text>
+          <View style={styles.subRow}>
+            <TouchableOpacity style={styles.subBtn} onPress={pickFromLibrary}>
+              <Ionicons name="images-outline" size={18} color={colors.primary} />
+              <Text style={styles.subBtnText}>写真から選ぶ</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.subBtn} onPress={pickPdf}>
+              <Ionicons name="document-attach-outline" size={18} color={colors.primary} />
+              <Text style={styles.subBtnText}>PDFを取り込む</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 自分が最近登録した書類 */}
+        <View style={styles.sectionHead}>
+          <Text style={styles.section}>最近登録した書類</Text>
+          <TouchableOpacity onPress={() => navigation.navigate("Documents")} hitSlop={8}>
+            <Text style={styles.sectionLink}>すべて見る</Text>
           </TouchableOpacity>
         </View>
-      </View>
+        {recent === null ? (
+          <ActivityIndicator style={{ marginTop: 16 }} color={colors.primary} />
+        ) : recent.length === 0 ? (
+          <View style={styles.empty}>
+            <Ionicons name="images-outline" size={32} color={colors.textSubtle} />
+            <Text style={styles.emptyText}>まだ登録した書類はありません。{"\n"}撮影すると、ここにタイトルとサムネイルが並びます。</Text>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            {recent.map((d, i) => (
+              <TouchableOpacity
+                key={d.id}
+                style={[styles.row, i > 0 && styles.rowBorder]}
+                onPress={() => navigation.navigate("Detail", { id: d.id, title: d.title })}
+              >
+                <DocThumb id={d.id} style={styles.thumb} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={2}>{d.title}</Text>
+                  <Text style={styles.rowMeta}>
+                    {formatDateTime(d.created_at)}
+                    {d.ocr_status !== "done" ? ` · ${OCR_LABEL[d.ocr_status] ?? d.ocr_status}` : ""}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.border} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </ScrollView>
+
+      <CaptureModal
+        visible={capture !== null}
+        initialPages={capture?.pages ?? NO_PAGES}
+        initialStep={capture?.step ?? "camera"}
+        onSubmit={submit}
+        onClose={() => setCapture(null)}
+      />
 
       {/* 登録先テナントの選択シート（全体管理者のみ） */}
       <Modal visible={picking} transparent animationType="fade" onRequestClose={() => setPicking(false)}>
@@ -316,91 +311,90 @@ export function CameraScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.camera },
-  center: { justifyContent: "center", alignItems: "center", paddingHorizontal: 32 },
-  permTitle: { color: "#fff", fontSize: 17, fontWeight: "700", marginTop: 16 },
-  permText: { color: "rgba(255,255,255,0.6)", fontSize: 14, marginTop: 6, textAlign: "center" },
-  permBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 28, paddingVertical: 13, marginTop: 24 },
-  permBtnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+// 閉じているときに毎回新しい配列を渡すと、モーダルの初期化が走り続けるため固定する
+const NO_PAGES: UploadPage[] = [];
 
-  top: { position: "absolute", top: 0, left: 0, right: 0, alignItems: "center", gap: 8 },
-  segment: { flexDirection: "row", backgroundColor: colors.overlay, borderRadius: radius.pill, padding: 3 },
-  segBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.pill },
-  segBtnActive: { backgroundColor: "#fff" },
-  segText: { color: "rgba(255,255,255,0.85)", fontWeight: "600", fontSize: 13 },
-  segTextActive: { color: colors.text },
-  pills: { flexDirection: "row", gap: 8, paddingHorizontal: 16 },
-  pill: {
+const styles = StyleSheet.create({
+  scroll: { padding: 16, paddingBottom: 32 },
+  notice: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    maxWidth: 220,
-    backgroundColor: colors.overlay,
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    gap: 8,
+    backgroundColor: colors.successSoft,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: 12,
   },
-  pillWarn: { backgroundColor: "#fbbf24" },
-  pillText: { color: "#fff", fontWeight: "600", fontSize: 13, flexShrink: 1 },
-
-  busy: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
-
-  bottom: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: 16, gap: 12 },
-  thumbs: { paddingHorizontal: 16, gap: 10 },
-  thumbWrap: { alignItems: "center" },
-  thumb: { width: 54, height: 72, borderRadius: radius.sm, backgroundColor: "#334155", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.9)" },
-  thumbIdx: {
-    position: "absolute",
-    top: 4,
-    left: 6,
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 11,
-    textShadowColor: "#000",
-    textShadowRadius: 3,
-  },
-  thumbDel: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#ef4444",
+  noticeWarn: { backgroundColor: colors.warningSoft },
+  noticeText: { flex: 1, color: colors.success, fontSize: 13, fontWeight: "600" },
+  pending: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
   },
-  thumbMove: { flexDirection: "row", gap: 12, marginTop: 4 },
-  save: {
-    marginHorizontal: 16,
+  pendingText: { flex: 1, color: colors.warning, fontWeight: "700", fontSize: 14 },
+  pendingAction: { color: colors.warning, fontWeight: "700", fontSize: 14 },
+  tenant: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    marginBottom: 12,
+  },
+  tenantLabel: { color: colors.textMuted, fontSize: 14 },
+  tenantName: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "600", textAlign: "right" },
+  hero: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    alignItems: "center",
+    paddingTop: 28,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  ring: { padding: 10, borderRadius: 100, backgroundColor: colors.primarySoft },
+  bigBtn: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
     backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  saveText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  controls: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly" },
-  side: { alignItems: "center", gap: 6, width: 72 },
-  sideIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.overlay,
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
   },
-  sideText: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600" },
-  shutter: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    borderWidth: 4,
-    borderColor: "#fff",
+  bigBtnText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+  heroHint: { color: colors.textSubtle, fontSize: 13, marginTop: 14 },
+  subRow: { flexDirection: "row", gap: 10, marginTop: 18, alignSelf: "stretch" },
+  subBtn: {
+    flex: 1,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.md,
+    paddingVertical: 12,
   },
-  shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#fff" },
+  subBtnText: { color: colors.primary, fontWeight: "700", fontSize: 14 },
+  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  section: { fontSize: 13, fontWeight: "700", color: colors.textMuted },
+  sectionLink: { fontSize: 13, fontWeight: "600", color: colors.primary },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, paddingHorizontal: 14 },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  thumb: { width: 44, height: 58, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  rowTitle: { fontSize: 15, fontWeight: "600", color: colors.text, lineHeight: 20 },
+  rowMeta: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
+  empty: { backgroundColor: colors.surface, borderRadius: radius.lg, alignItems: "center", gap: 10, padding: 24 },
+  emptyText: { color: colors.textSubtle, fontSize: 13, textAlign: "center", lineHeight: 19 },
 
   sheetRoot: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
   sheet: {

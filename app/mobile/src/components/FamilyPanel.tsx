@@ -6,6 +6,7 @@ import {
   ACTIONS,
   addComment,
   apiErrorMessage,
+  formatDateTime as fmtDateTime,
   formatMonthDay,
   getFamilyStatus,
   getMe,
@@ -19,11 +20,6 @@ import {
 } from "../api/client";
 import { colors, radius } from "../theme";
 import { DeadlineChip, ImportanceBadge } from "./FamilyBadges";
-
-function fmtDateTime(iso: string) {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
 
 // 家族それぞれの状態表示: 対応状況 > 既読 > 未読
 function memberState(m: FamilyMember): { text: string; tone: "ok" | "pending" | "info" } {

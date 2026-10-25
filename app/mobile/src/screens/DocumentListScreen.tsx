@@ -2,17 +2,10 @@ import { useCallback, useState } from "react";
 import { View, Text, FlatList, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { listDocuments, type DocumentRead } from "../api/client";
+import { listDocuments, OCR_LABEL, type DocumentRead } from "../api/client";
 import { DocThumb } from "../components/DocThumb";
 import { DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
 import { colors, radius } from "../theme";
-
-const OCR_LABEL: Record<string, string> = {
-  done: "完了",
-  processing: "読み取り中",
-  pending: "待機中",
-  failed: "失敗",
-};
 
 // 家に届いた紙の箱: 未読 / 重要 / 期限あり で見逃しを防ぐ（Web の一覧と同じ区分）
 type Filter = "all" | "unread" | "important" | "deadline" | "read";
@@ -95,7 +88,10 @@ export function DocumentListScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.row} onPress={() => open(item)}>
-              <View style={[styles.unreadDot, item.is_read && { backgroundColor: "transparent" }]} />
+              <View>
+                <DocThumb id={item.id} style={styles.rowThumb} />
+                {!item.is_read && <View style={styles.rowUnread} />}
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.title, !item.is_read && styles.titleUnread]} numberOfLines={2}>
                   {item.title}
@@ -172,14 +168,25 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     backgroundColor: colors.surface,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: radius.lg,
     marginBottom: 8,
   },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+  rowThumb: { width: 48, height: 64, borderRadius: radius.sm, backgroundColor: colors.surfaceMuted },
+  rowUnread: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
   title: { fontSize: 15, color: colors.text, lineHeight: 21 },
   titleUnread: { fontWeight: "700" },
   meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6 },
