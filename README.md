@@ -376,7 +376,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 
 | 領域 | 技術 |
 |---|---|
-| モバイル | React Native 0.86 / Expo SDK 57 / React 19.2 / TypeScript / React Navigation 7 / expo-camera / expo-notifications |
+| モバイル | React Native 0.88 / Expo SDK 58 / React 19.3 / TypeScript / React Navigation 7 / expo-camera / expo-notifications |
 | Web | React 18 / TypeScript / Vite 5 / React Router 6 |
 | バックエンド | Python 3.12 / FastAPI / SQLAlchemy 2 / Pydantic 2 |
 | OCR・画像処理 | Tesseract（`jpn+jpn_vert+eng`、tessdata_best）/ ocrmypdf / OpenCV / Pillow |
@@ -647,7 +647,7 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 | D12 | スキーマは Alembic を導入するまで `create_all` と冪等な DDL で管理する。起動時の初期化はアドバイザリロックで1プロセスずつ実行する |
 | D13 | 外部ストレージはテナント単位で「メインの保存先」を置き換える方式とする（バックアップの複製ではない）。書類ごとに保存先を記録し、切り替えても登録済みの書類は移さない。Synology NAS は WebDAV で、Google ドライブは OAuth（`drive.file`）で連携する |
 | D14 | 機密書類は、オンプレ指定の保存先（Synology NAS・S3 互換で管理者が指定したもの）にだけ置く。クラウドの保存先が使用中でも、機密書類はサーバー内の MinIO に置く |
-| D15 | モバイルは Expo SDK 57 とし、Expo Go で起動できる構成を保つ（開発ビルドは必須にしない） |
+| D15 | モバイルは Expo SDK 58 とし、Expo Go で起動できる構成を保つ（開発ビルドは必須にしない） |
 
 ## 22. 未決事項
 

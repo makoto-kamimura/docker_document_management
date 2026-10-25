@@ -16,7 +16,8 @@
         }
       ],
       "expo-notifications",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-font"
     ],
     "icon": "./assets/icon.png"
   }

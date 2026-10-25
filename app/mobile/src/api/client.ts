@@ -83,7 +83,7 @@ export async function downloadAuthed(path: string, fileName: string): Promise<{ 
   const file = new File(Paths.cache, fileName);
   if (res.ok) {
     file.create({ overwrite: true });
-    file.write(new Uint8Array(await res.arrayBuffer()));
+    await file.write(new Uint8Array(await res.arrayBuffer())); // SDK 58 から非同期
   }
   return { status: res.status, uri: file.uri };
 }

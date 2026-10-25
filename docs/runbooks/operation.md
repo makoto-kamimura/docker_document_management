@@ -9,8 +9,8 @@
 | 用途 | ソフトウェア | 確認コマンド |
 |---|---|---|
 | バックエンド/インフラ/Web | Docker Desktop | `docker --version` / `docker compose version` |
-| モバイル開発 | Node.js (20.19.4+、22 LTS 推奨) | `node --version` |
-| モバイル実機確認 | スマホに **Expo Go** アプリ（**Expo SDK 57** 対応版。iOS 16.4+ / Android 7+） | App Store / Google Play |
+| モバイル開発 | Node.js (22.13+ または 24.3+。奇数版は非対応) | `node --version` |
+| モバイル実機確認 | スマホに **Expo Go** アプリ（**Expo SDK 58** 対応版。iOS 16.4+ / Android 7+） | App Store / Google Play |
 
 > Docker Desktop は事前に起動しておく（デーモンが立ち上がるまで数十秒かかる）。
 > 起動確認: `docker info` がエラーなく返ること。
@@ -156,7 +156,7 @@ npm run dev                   # http://localhost:5173
 
 カメラ撮影が主機能のため、**実機 + Expo Go** での確認を推奨（iOSシミュレータ等ではカメラが使えない）。
 
-> 本アプリは **Expo SDK 57**（React Native 0.86 / React 19.2）。スマホの Expo Go が対応するSDKと一致している必要がある（不一致だと `Project is incompatible with this version of Expo Go`）。端末の Expo Go が古い場合は App Store / Google Play で更新する。ストアの Expo Go が SDK 57 に対応していない場合は、iOS 実機は `eas go`、Android は `npx expo start` 実行中に `a` キーで SDK 57 対応版の Expo Go を入れられる。
+> 本アプリは **Expo SDK 58**（React Native 0.88 / React 19.3）。スマホの Expo Go が対応するSDKと一致している必要がある（不一致だと `Project is incompatible with this version of Expo Go`）。端末の Expo Go が古い場合は App Store / Google Play で更新する。ストアの SDK 58 版 Expo Go は SDK 58 専用で、SDK 57 以前のアプリは開けない。ストアの Expo Go が SDK 58 に対応していない場合は、iOS 実機は `eas go`、Android は `npx expo start` 実行中に `a` キーで SDK 58 対応版の Expo Go を入れられる。
 
 ### 前提
 

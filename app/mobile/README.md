@@ -3,13 +3,13 @@
 React Native (Expo) + TypeScript。紙資料の撮影・取り込み・閲覧を行う。
 
 ## 技術スタック
-- Expo SDK 57 / React Native 0.86 / React 19.2 / TypeScript 6（Expo Go で起動できる構成）
+- Expo SDK 58 / React Native 0.88 / React 19.3 / TypeScript 6（Expo Go で起動できる構成。SDK 58 版の Expo Go が必要）
 - expo-camera（撮影）, expo-image-manipulator（補正/最適化の足場）
 - expo-file-system（新 API の `File` / `Directory` / `Paths`。ダウンロード・オフライン退避）
 - expo-notifications / expo-constants（プッシュ通知。projectId 設定時のみ有効）
 - React Navigation 7（下タブ: 撮影 / 書類 / 検索 / お知らせ）, @expo/vector-icons（Ionicons）, axios
 
-依存の更新は `npx expo install --fix`、確認は `npx expo-doctor@latest` で行う（Node.js 20.19.4 以上）。
+依存の更新は `npx expo install --fix`、確認は `npx expo-doctor@latest` で行う（Node.js 22.13 以上または 24.3 以上）。
 
 ## ディレクトリ
 ```
