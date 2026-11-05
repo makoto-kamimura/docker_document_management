@@ -1,7 +1,7 @@
 """外部ストレージ連携（テナントごとの保存先: Cloudflare R2 / Google ドライブ / Synology NAS）。
 
 テナント管理者が保存先を登録・接続テストし、1つを「使用中」にする。以後に登録する書類は
-その保存先へ保存される（既存の書類は元の保存先のまま）。super_admin は X-Tenant-Id で対象を選ぶ。
+その保存先へ保存される（既存の書類は元の保存先のまま）。super_admin は操作中のテナントの保存先を扱う。
 
 デモテナントは公開アカウントで誰でも管理者として入れるため、登録・変更を禁止する
 （任意の URL へサーバーから通信させる踏み台にされないように）。
@@ -17,7 +17,7 @@ from jose import JWTError, jwt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_role, require_tenant
+from app.api.deps import require_role, tenant_scope
 from app.core.config import settings
 from app.core.crypto import SecretKeyMissing, decrypt_json, encrypt_json
 from app.db.session import get_db
@@ -159,7 +159,7 @@ def _run_test(db: Session, backend: StorageBackend) -> tuple[bool, str | None]:
 
 
 @router.get("", response_model=StorageOverview)
-def get_overview(db: Session = Depends(get_db), tenant_id: uuid.UUID = Depends(require_tenant)):
+def get_overview(db: Session = Depends(get_db), tenant_id: uuid.UUID = Depends(tenant_scope)):
     tenant = _tenant(db, tenant_id)
     backends = list(
         db.scalars(
@@ -181,7 +181,7 @@ def get_overview(db: Session = Depends(get_db), tenant_id: uuid.UUID = Depends(r
 def create_backend(
     payload: StorageBackendCreate,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """保存先を登録し、そのまま接続テストする（失敗しても登録は残し、修正できるようにする）。"""
     tenant = _tenant(db, tenant_id)
@@ -213,7 +213,7 @@ def update_backend(
     backend_id: uuid.UUID,
     payload: StorageBackendUpdate,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """設定を更新して接続テストし直す。認証情報は入力した項目だけ差し替える。"""
     tenant = _tenant(db, tenant_id)
@@ -244,7 +244,7 @@ def update_backend(
 def delete_backend(
     backend_id: uuid.UUID,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """書類が1件も保存されていない保存先だけ削除できる（書類が読めなくならないように）。"""
     tenant = _tenant(db, tenant_id)
@@ -268,7 +268,7 @@ def delete_backend(
 def test_backend(
     backend_id: uuid.UUID,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     tenant = _tenant(db, tenant_id)
     backend = _backend(db, tenant, backend_id)
@@ -280,7 +280,7 @@ def test_backend(
 def set_active(
     payload: ActiveStorageUpdate,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """新しく登録する書類の保存先を切り替える。接続テストに成功した保存先だけ選べる。"""
     tenant = _tenant(db, tenant_id)
@@ -312,7 +312,7 @@ def google_authorize(
     backend_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(require_role(Role.admin)),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """Google の同意画面の URL を返す。backend_id を付けると既存の連携をつなぎ直す（再連携）。"""
     _google_ready()
@@ -369,7 +369,7 @@ def google_callback(
     # state の発行後に権限が外れていないか確かめる
     if (
         tenant is None or tenant.is_demo or user is None or user.role not in ADMIN_ROLES
-        or (user.role != Role.super_admin and user.tenant_id != tenant.id)
+        or user.scope_tenant_id != tenant.id
     ):
         return _back_to_web("error", "この操作を行う権限がありません")
 

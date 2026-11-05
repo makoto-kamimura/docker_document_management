@@ -38,7 +38,10 @@ class Document(Base):
         ForeignKey("tenants.id"), index=True, nullable=True
     )
     title: Mapped[str] = mapped_column(String(255), index=True)
-    category: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    # カテゴリ（公開範囲を決める）。NULL は未分類で、公開範囲「家族」と同じに扱う
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("categories.id"), index=True, nullable=True
+    )
     document_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     file_format: Mapped[str] = mapped_column(String(20), default="pdf")

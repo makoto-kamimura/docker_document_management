@@ -150,7 +150,6 @@ def process_pending() -> None:
                     "ocr_text": text,
                     "summary": summary,
                     "tags": tags,
-                    "category": doc.category,
                     "document_type": doc.document_type,
                     "owner_id": str(doc.owner_id),
                     "tenant_id": str(doc.tenant_id) if doc.tenant_id else None,

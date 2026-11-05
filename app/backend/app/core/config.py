@@ -85,12 +85,14 @@ class Settings(BaseSettings):
     seed_admin_password: str = "admin123"
 
     # デモテナントの公開アカウント（案内はポートフォリオ側に載せ、アプリには出さない）。
-    # ロールごとの見え方を試せるよう 管理者/登録者/閲覧者 の3つを用意し、同じグループに入れる。
-    # 空にしたアカウントは作成しない。パスワードは3つ共通。
+    # ロールごとの見え方を試せるよう 管理者/登録者/閲覧者 と、カテゴリの公開範囲を試す子供
+    # （登録者・子供の印つき）を用意し、同じグループに入れる。
+    # 空にしたアカウントは作成しない。パスワードは共通。
     seed_demo_password: str = "demo123"
     seed_demo_admin_email: str = "demo@example.com"
     seed_demo_registrar_email: str = "demo-registrar@example.com"
     seed_demo_viewer_email: str = "demo-viewer@example.com"
+    seed_demo_child_email: str = "demo-child@example.com"
     seed_demo_group_name: str = "デモ家族"
 
 

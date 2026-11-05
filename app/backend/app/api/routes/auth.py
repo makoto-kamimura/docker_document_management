@@ -28,7 +28,13 @@ def login(
 
 @router.get("/me", response_model=UserRead)
 def me(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """ログイン中ユーザーの情報（権限ゲート・所属テナントの表示に利用）。"""
-    tenant = db.get(Tenant, current.tenant_id) if current.tenant_id else None
-    current.tenant_name = tenant.name if tenant else None
-    return current
+    """ログイン中ユーザーの情報（権限ゲート・所属テナントの表示に利用）。
+
+    全体管理者は操作中のテナントを tenant_id / tenant_name で返す（未選択なら None）。
+    """
+    tenant_id = current.scope_tenant_id
+    tenant = db.get(Tenant, tenant_id) if tenant_id else None
+    return UserRead.model_validate(current).model_copy(update={
+        "tenant_id": tenant.id if tenant else None,
+        "tenant_name": tenant.name if tenant else None,
+    })

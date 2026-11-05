@@ -5,10 +5,13 @@
 何度実行しても安全。PostgreSQL 以外では何もしない。
 
 実行順序 (`app.main.init_db`):
-  1. `Base.metadata.create_all` … 新規テーブル(tenants など)の作成
+  1. `Base.metadata.create_all` … 新規テーブル(tenants / categories など)の作成
   2. `add_tenant_columns()`      … 既存テーブルへの列追加・ロール追加
      `add_storage_columns()`     … 外部ストレージ連携の列（tenants / documents.storage_backend_id）
-  3. シード/バックフィル         … テナント作成と `tenant_id` の充填
+     `add_category_columns()`    … カテゴリと全体管理者の列（documents.category_id / users.is_child /
+                                    users.active_tenant_id）
+  3. シード/バックフィル         … テナント作成と `tenant_id` の充填、旧カテゴリ文字列の移し替え
+                                    (`move_free_text_categories`)
   4. `finalize()`                … NOT NULL 制約とテナント内一意制約の付与
 """
 
@@ -58,6 +61,61 @@ def add_storage_columns() -> None:
         "CREATE INDEX IF NOT EXISTS ix_documents_storage_backend_id "
         "ON documents (storage_backend_id)"
     )
+
+
+def add_category_columns() -> None:
+    """カテゴリ（公開範囲つき）と、全体管理者の操作中のテナントの列を既存テーブルへ追加する。
+
+    categories テーブルは create_all が作成する。
+    """
+    if not _is_postgres():
+        return
+    _exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_child BOOLEAN NOT NULL DEFAULT false")
+    _exec(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS active_tenant_id UUID "
+        "REFERENCES tenants(id)"
+    )
+    _exec(
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS category_id UUID "
+        "REFERENCES categories(id)"
+    )
+    _exec("CREATE INDEX IF NOT EXISTS ix_documents_category_id ON documents (category_id)")
+
+
+def move_free_text_categories(db: Session) -> None:
+    """旧 `documents.category`（自由入力の文字列）を書類種別へ移し、列を削除する。
+
+    カテゴリは見られる人を決めるようになったため、旧カテゴリの書類はすべて未分類（従来どおりの
+    共有範囲）にする。文字は捨てずに、書類種別が空なら書類種別へ、入っていればタグへ移す。
+    """
+    if not _is_postgres():
+        return
+    exists = db.scalar(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'documents' AND column_name = 'category'"
+        )
+    )
+    if not exists:
+        return
+    db.execute(
+        text(
+            "UPDATE documents SET document_type = category, category = NULL "
+            "WHERE category IS NOT NULL AND COALESCE(document_type, '') = ''"
+        )
+    )
+    db.execute(
+        text(
+            "INSERT INTO document_tags (id, document_id, tag) "
+            "SELECT gen_random_uuid(), d.id, d.category FROM documents d "
+            "WHERE d.category IS NOT NULL AND NOT EXISTS ("
+            "  SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag = d.category)"
+        )
+    )
+    db.execute(text("UPDATE documents SET category = NULL WHERE category IS NOT NULL"))
+    db.commit()
+    _exec("ALTER TABLE documents DROP COLUMN IF EXISTS category")
+    print("[migrate] documents.category moved to document_type / tags")
 
 
 def backfill(db: Session, legacy_tenant_id) -> None:

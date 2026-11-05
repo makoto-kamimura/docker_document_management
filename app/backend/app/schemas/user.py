@@ -13,8 +13,10 @@ class UserRead(BaseModel):
     email: str
     name: str
     role: Role
-    tenant_id: uuid.UUID | None = None   # super_admin は None
+    # 所属テナント。super_admin は所属しないため None（/auth/me では操作中のテナントを返す）
+    tenant_id: uuid.UUID | None = None
     tenant_name: str | None = None       # 表示用（一覧/認証情報で付与）
+    is_child: bool = False               # 子供（公開範囲「子供以外」の書類を見られない）
     created_at: datetime
 
 
@@ -23,8 +25,7 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     role: Role = Role.viewer
     password: str = Field(min_length=4, max_length=72)
-    # 所属テナント。テナント管理者は自分のテナント固定、super_admin のみ指定できる
-    tenant_id: uuid.UUID | None = None
+    is_child: bool = False
 
 
 class UserUpdate(BaseModel):
@@ -32,8 +33,7 @@ class UserUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
     role: Role | None = None
-    # テナントの移動は super_admin のみ（所有ドキュメント・通知も一緒に移る）
-    tenant_id: uuid.UUID | None = None
+    is_child: bool | None = None
 
 
 class PasswordReset(BaseModel):

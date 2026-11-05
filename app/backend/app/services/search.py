@@ -1,7 +1,8 @@
 """全文検索 (F-23〜F-26)。OpenSearch に OCRテキスト/要約/メタデータを索引する。
 
-検索対象: タイトル・OCR全文・**要約テキスト**・タグ・カテゴリ。
+検索対象: タイトル・OCR全文・**要約テキスト**・タグ。
 要約はワーカーが `summarize` で生成したものを索引し、全文検索でヒットさせる。
+カテゴリは索引に持たせない（公開範囲・名前が後から変わるため、閲覧範囲とカテゴリ名は DB で決める）。
 """
 
 from opensearchpy import OpenSearch
@@ -21,7 +22,6 @@ _FIELD_MAPPING = {
         "analyzer": "ja_analyzer",
         "fields": {"raw": {"type": "keyword"}},
     },
-    "category": {"type": "keyword"},
     "document_type": {"type": "keyword"},
     "owner_id": {"type": "keyword"},
     "tenant_id": {"type": "keyword"},
@@ -120,10 +120,9 @@ def search(
     タイトル・OCR本文・要約・タグを横断し、表記ゆれにあいまい一致(fuzziness)で対応する。
 
     `access` は閲覧できるドキュメントの条件。
-    - `tenant_id`: 必ず一致させるテナント（テナント分離。全体管理者のみ None で全テナント横断）
-    - `owner_ids` / `doc_ids`: テナント内でさらに絞る閲覧範囲 (F-36/F-37)。
-      キー自体が無ければテナント内は全件（テナント管理者）。どちらも空リストなら
-      閲覧できるドキュメントが無いので検索しない。
+    - `tenant_id`: 必ず一致させるテナント（テナント分離）
+    - `doc_ids`: 閲覧できるドキュメントの ID (F-36/F-37)。DB で公開範囲・共有・グループから求める。
+      キー自体が無ければテナント内は全件。空リストなら閲覧できるドキュメントが無いので検索しない。
     """
     must: list[dict] = [
         {
@@ -145,15 +144,10 @@ def search(
     if access is not None:
         if access.get("tenant_id"):
             filter_clauses.append({"term": {"tenant_id": str(access["tenant_id"])}})
-        if "owner_ids" in access or "doc_ids" in access:
-            should: list[dict] = []
-            if access.get("owner_ids"):
-                should.append({"terms": {"owner_id": [str(i) for i in access["owner_ids"]]}})
-            if access.get("doc_ids"):
-                should.append({"ids": {"values": [str(i) for i in access["doc_ids"]]}})
-            if not should:
+        if "doc_ids" in access:
+            if not access["doc_ids"]:
                 return []
-            filter_clauses.append({"bool": {"should": should, "minimum_should_match": 1}})
+            filter_clauses.append({"ids": {"values": [str(i) for i in access["doc_ids"]]}})
 
     res = client().search(
         index=settings.search_index,
@@ -182,7 +176,6 @@ def search(
                 "title": src.get("title"),
                 "snippet": snippet,
                 "score": h["_score"],
-                "category": src.get("category"),
                 "tags": tags,
                 "matched_in": matched,
             }
