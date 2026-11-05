@@ -3,12 +3,13 @@ from datetime import datetime, date
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.category import CategoryVisibility
 from app.models.document import StorageLocation, Sensitivity, OcrStatus
 
 
 class DocumentCreate(BaseModel):
     title: str
-    category: str | None = None
+    category_id: uuid.UUID | None = None
     document_type: str | None = None
     sensitivity: Sensitivity = Sensitivity.internal
     tags: list[str] = []
@@ -21,7 +22,12 @@ class DocumentRead(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID | None = None
     title: str
-    category: str | None
+    category_id: uuid.UUID | None = None
+    category: str | None = None            # カテゴリ名（一覧/取得時に付与）
+    # 見られる人の範囲。未分類は family（従来どおり）
+    category_visibility: CategoryVisibility = CategoryVisibility.family
+    category_icon: str | None = None       # カテゴリのアイコン・色（一覧で見分ける用）
+    category_color: str | None = None
     document_type: str | None
     page_count: int
     file_format: str
@@ -56,7 +62,7 @@ class DocumentUpdate(BaseModel):
     """メタデータ/OCRテキストの編集 (F-16/F-17)。指定フィールドのみ更新。"""
 
     title: str | None = None
-    category: str | None = None
+    category_id: uuid.UUID | None = None  # null を送ると未分類に戻す
     document_type: str | None = None
     sensitivity: Sensitivity | None = None
     retention_until: date | None = None
@@ -84,4 +90,4 @@ class SearchHit(BaseModel):
     score: float
     category: str | None = None
     tags: list[str] = []
-    matched_in: str | None = None  # ヒット箇所: ocr_text / summary / title など
+    matched_in: str | None = None  # ヒット箇所: ocr_text / title

@@ -1,0 +1,4 @@
+# OCR ワーカーだけで使う依存（backend の API イメージには入れない）
+# 撮影した書類の本文を PaddleOCR（PP-OCR）で読む: app/services/paddle_ocr.py
+rapidocr==3.10.0
+onnxruntime==1.31.0

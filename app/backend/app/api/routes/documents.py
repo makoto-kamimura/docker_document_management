@@ -5,11 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
-    co_member_user_ids, ensure_can_access, get_current_user, is_admin, require_tenant,
-    same_tenant, tenant_clause, tenant_scope,
+    can_access, ensure_can_access, get_current_user, is_admin, tenant_scope,
+    visible_documents_clause,
 )
 from app.db.session import get_db
 from app.models.access_log import AccessLog, Action
+from app.models.category import CategoryVisibility
 from app.models.document import Document, Sensitivity, OcrStatus
 from app.models.document_permission import DocumentPermission, PermissionLevel
 from app.models.document_tag import DocumentTag
@@ -20,7 +21,7 @@ from app.models.user import User
 from app.schemas.document import DocumentDetail, DocumentRead, DocumentUpdate, VersionRead
 from app.schemas.acl import PermissionRead, PermissionUpsert
 from app.schemas.read import ReadReceiptRead
-from app.services import family, storage, summarize, pdf_export, search
+from app.services import categories, family, storage, pdf_export, search
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -64,7 +65,7 @@ def _tags_map(db: Session, doc_ids: list) -> dict:
 
 
 def _decorate(db: Session, docs: list, user: User) -> list:
-    """レスポンス用の一時属性（既読・タグ・解析結果・自分の対応・家族の確認人数）を付与する。
+    """レスポンス用の一時属性（カテゴリ・既読・タグ・解析結果・自分の対応・家族の確認人数）を付与する。
 
     一覧でも N+1 にならないようまとめて取得する。pydantic from_attributes が読む。
     """
@@ -76,7 +77,13 @@ def _decorate(db: Session, docs: list, user: User) -> list:
     } if doc_ids else {}
     members = family.family_ids_map(db, docs)
     reads, actions = family.status_maps(db, doc_ids)
+    cats = categories.by_ids(db, [d.category_id for d in docs])
     for d in docs:
+        cat = cats.get(d.category_id)
+        d.category = cat.name if cat else None
+        d.category_visibility = cat.visibility if cat else CategoryVisibility.family
+        d.category_icon = cat.icon if cat else None
+        d.category_color = cat.color if cat else None
         d.is_read = (d.id, user.id) in reads
         d.tags = tags.get(d.id, [])
         ins = insights.get(d.id)
@@ -100,26 +107,14 @@ def _decorate(db: Session, docs: list, user: User) -> list:
 
 
 def _reindex(db: Session, doc: Document) -> None:
-    """ドキュメントを検索索引へ再登録する（メタ/OCR/タグ/要約を反映, F-23〜F-26）。
-
-    保存済みの要約 `{id}/summary.txt` があれば検索対象に含める。
-    """
-    summary = ""
-    try:
-        summary = storage.get_object(
-            doc, f"{doc.id}/summary.txt"
-        ).decode("utf-8", "ignore")
-    except Exception:
-        summary = ""
+    """ドキュメントを検索索引へ再登録する（メタ/OCR/タグを反映, F-23〜F-26）。"""
     try:
         search.index_document(
             str(doc.id),
             {
                 "title": doc.title,
                 "ocr_text": doc.ocr_text or "",
-                "summary": summary,
                 "tags": _tags_for(db, doc.id),
-                "category": doc.category,
                 "document_type": doc.document_type,
                 "owner_id": str(doc.owner_id),
                 "tenant_id": str(doc.tenant_id) if doc.tenant_id else None,
@@ -148,29 +143,20 @@ def _media_type(file_format: str | None) -> str:
 def list_documents(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    _scope: uuid.UUID = Depends(tenant_scope),
 ):
     """ドキュメント一覧 (F-21)。
 
-    まず**テナント**で絞り込み、その中で テナント管理者は全件、それ以外は
-    所有 / per-user ACL / 所有者と同一グループ のドキュメント (F-36)。
+    まず**テナント**で絞り込み、その中でカテゴリの公開範囲を上限として、テナント管理者は全件、
+    それ以外は 所有 / per-user ACL / 所有者と同一グループ のドキュメント (F-36)。
+    「全員」「子供以外」のカテゴリは範囲内の全員に見える（`deps.visible_documents_clause`）。
     各ドキュメントに現在ユーザー基準の既読フラグ is_read を付与する (F-32)。
     """
     stmt = (
         select(Document)
-        .where(tenant_clause(Document.tenant_id, scope))
+        .where(visible_documents_clause(db, user))
         .order_by(Document.created_at.desc())
     )
-    if not is_admin(user):
-        granted = select(DocumentPermission.document_id).where(
-            DocumentPermission.user_id == user.id
-        )
-        co_members = co_member_user_ids(db, user.id)  # 自分を含む同一グループの全員
-        stmt = stmt.where(
-            (Document.owner_id == user.id)
-            | (Document.id.in_(granted))
-            | (Document.owner_id.in_(co_members))
-        )
     return _decorate(db, list(db.scalars(stmt).all()), user)
 
 
@@ -179,19 +165,22 @@ def create_document(
     title: str = Form(...),
     sensitivity: Sensitivity = Form(Sensitivity.internal),
     mode: str = Form("color"),
+    category_id: uuid.UUID | None = Form(None),
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     """撮影/PDFのアップロードと登録 (F-01/F-02/F-10/F-12/F-17/F-20)。
 
     複数ページ（撮影連写/ライブラリ取込）を1ドキュメントとして受け付ける。生ページは
     `{id}/pages/{i:03d}` に保存し、画像処理(台形補正/補正/モード)・PDF統合・OCRは
     ワーカーへ委譲する（ステータス pending, F-13）。`mode` は color/gray/bw。
+    `category_id` を指定すると、そのカテゴリの公開範囲の人だけが見られる。
     """
     if not files:
         raise HTTPException(status_code=400, detail="ファイルが指定されていません")
+    category = categories.load_in_tenant(db, category_id, tenant_id)
 
     first = files[0]
     fmt = (first.filename or "").split(".")[-1].lower() or "jpg"
@@ -201,6 +190,7 @@ def create_document(
         id=uuid.uuid4(),  # ストレージキーを確定させるため明示生成（commit前に id を使う）
         tenant_id=tenant_id,
         title=title,
+        category_id=category.id if category else None,
         sensitivity=sensitivity,
         storage_location=location,
         storage_backend_id=backend_id,
@@ -332,7 +322,7 @@ def export_ocr_text_pdf(
 ):
     """OCRで認識した文字を集約した電子資料PDF（全文）を生成して返す (F-13/F-14系)。
 
-    要約ではなくOCR抽出テキストの全文をPDF化する。OCR未完了なら 409。
+    OCR抽出テキストの全文をPDF化する。OCR未完了なら 409。
     """
     doc = db.get(Document, doc_id)
     if doc is None:
@@ -351,32 +341,6 @@ def export_ocr_text_pdf(
     )
 
 
-@router.get("/{doc_id}/pdf")
-def export_summary_pdf(
-    doc_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """OCRテキストを要約し、要約電子資料PDFを生成して返す (F-14系)。"""
-    doc = db.get(Document, doc_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
-    ensure_can_access(db, doc, user, PermissionLevel.view)
-    if doc.ocr_status != OcrStatus.done or not doc.ocr_text:
-        raise HTTPException(status_code=409, detail="OCR未完了のため要約PDFを生成できません")
-
-    summary = summarize.summarize(doc.ocr_text)
-    pdf_bytes = pdf_export.build_summary_pdf(doc.title, summary)
-
-    db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.download))
-    db.commit()
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="summary_{doc.id}.pdf"'},
-    )
-
-
 @router.patch("/{doc_id}", response_model=DocumentRead)
 def update_document(
     doc_id: uuid.UUID,
@@ -387,6 +351,7 @@ def update_document(
     """メタデータ/タグ/OCRテキストの編集 (F-16/F-17)。編集権限が必要。
 
     指定フィールドのみ更新し、タグは全置換する。機密度変更時は保存先を再判定する。
+    カテゴリを変えると見られる人も変わる（公開範囲はカテゴリで決まる）。
     変更後は検索索引へ再登録する（OCR修正・タグ追加が検索に即反映）。
     """
     doc = db.get(Document, doc_id)
@@ -397,8 +362,9 @@ def update_document(
     data = payload.model_dump(exclude_unset=True)
     if "title" in data and data["title"] is not None:
         doc.title = data["title"]
-    if "category" in data:
-        doc.category = data["category"]
+    if "category_id" in data:
+        category = categories.load_in_tenant(db, data["category_id"], doc.tenant_id)
+        doc.category_id = category.id if category else None
     if "document_type" in data:
         doc.document_type = data["document_type"]
     if "retention_until" in data:
@@ -582,7 +548,7 @@ def create_version(
 
 def _load_doc_for_acl(doc_id: uuid.UUID, db: Session, user: User) -> Document:
     doc = db.get(Document, doc_id)
-    if doc is None or not same_tenant(user, doc.tenant_id):
+    if doc is None or not can_access(db, doc, user, PermissionLevel.view):
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
     if not is_admin(user) and doc.owner_id != user.id:
         raise HTTPException(status_code=403, detail="権限設定は管理者または所有者のみ可能です")
@@ -680,7 +646,7 @@ def list_read_receipts(
 ):
     """既読者一覧（誰がいつ読んだか, F-32/F-30）。管理者またはドキュメント所有者のみ。"""
     doc = db.get(Document, doc_id)
-    if doc is None or not same_tenant(user, doc.tenant_id):
+    if doc is None or not can_access(db, doc, user, PermissionLevel.view):
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
     if not is_admin(user) and doc.owner_id != user.id:
         raise HTTPException(status_code=403, detail="既読者の確認は管理者または所有者のみ可能です")

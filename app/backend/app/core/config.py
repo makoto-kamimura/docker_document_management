@@ -42,14 +42,13 @@ class Settings(BaseSettings):
 
     # OCR（縦書き jpn_vert + 横書き jpn + 英数 eng。traineddata は worker イメージに導入済）
     ocr_lang: str = "jpn+jpn_vert+eng"
-
-    # 要約 (Dify)。dify_api_key 未設定時はルールベース簡易要約にフォールバックする。
-    dify_api_base: str = "https://api.dify.ai/v1"   # 自己ホスト時は http://<host>/v1 等
-    dify_api_key: str = ""
-    dify_app_type: str = "completion"               # completion | workflow
-    dify_input_var: str = "text"                    # Difyアプリの入力変数名
-    dify_output_var: str = "summary"                # workflow時の出力ノード変数名
-    summary_max_chars: int = 4000                   # Difyへ送る/フォールバック要約の上限文字数
+    # 撮影した書類の本文を読むエンジン。paddle なら PaddleOCR（RapidOCR / ONNX Runtime）で読み、
+    # 読めなかったページは Tesseract に戻す。tesseract なら Tesseract だけ。検索可能 PDF の
+    # テキスト層は常に Tesseract。モデル・縮小の大きさは scripts/ocr_eval.py の結果で決めた
+    # （docs/design/plan-capture-viewer-account.md）
+    ocr_text_engine: str = "paddle"            # paddle | tesseract
+    ocr_paddle_preset: str = "v6-small"        # app.services.paddle_ocr.PRESETS（イメージに焼き込んだもの）
+    ocr_paddle_max_side: int = 1600            # 長辺をこの大きさまで縮めて読む（メモリと速さ）
 
     # 家族への通知 (アプリ内通知 + Expo プッシュ)
     # プッシュは端末が Expo Push Token を登録したときだけ送る（EAS の projectId を設定したアプリのみ登録される）。
@@ -85,12 +84,14 @@ class Settings(BaseSettings):
     seed_admin_password: str = "admin123"
 
     # デモテナントの公開アカウント（案内はポートフォリオ側に載せ、アプリには出さない）。
-    # ロールごとの見え方を試せるよう 管理者/登録者/閲覧者 の3つを用意し、同じグループに入れる。
-    # 空にしたアカウントは作成しない。パスワードは3つ共通。
+    # ロールごとの見え方を試せるよう 管理者/登録者/閲覧者 と、カテゴリの公開範囲を試す子供
+    # （登録者・子供の印つき）を用意し、同じグループに入れる。
+    # 空にしたアカウントは作成しない。パスワードは共通。
     seed_demo_password: str = "demo123"
     seed_demo_admin_email: str = "demo@example.com"
     seed_demo_registrar_email: str = "demo-registrar@example.com"
     seed_demo_viewer_email: str = "demo-viewer@example.com"
+    seed_demo_child_email: str = "demo-child@example.com"
     seed_demo_group_name: str = "デモ家族"
 
 

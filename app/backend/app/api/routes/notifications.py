@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, tenant_clause, tenant_scope
+from app.api.deps import get_current_user, tenant_scope, visible_documents_clause
 from app.db.session import get_db
+from app.models.document import Document
 from app.models.family import Notification, PushToken
 from app.models.user import User
 from app.schemas.family import NotificationRead, PushTokenCreate, UnreadCount
@@ -16,20 +17,25 @@ from app.schemas.family import NotificationRead, PushTokenCreate, UnreadCount
 router = APIRouter(tags=["notifications"])
 
 
+def _visible(db: Session, user: User, scope: uuid.UUID):
+    """現在のテナントの、今も見られる書類の通知（カテゴリを変えて見られなくなった書類の分は出さない）。"""
+    docs = select(Document.id).where(visible_documents_clause(db, user))
+    return (Notification.tenant_id == scope) & (
+        Notification.document_id.is_(None) | Notification.document_id.in_(docs)
+    )
+
+
 @router.get("/notifications", response_model=list[NotificationRead])
 def list_notifications(
     limit: int = 50,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
-    """自分宛ての通知（新しい順）。現在のテナントのものだけを返す。"""
+    """自分宛ての通知（新しい順）。現在のテナントの、今も見られる書類のものだけを返す。"""
     return db.scalars(
         select(Notification)
-        .where(
-            Notification.user_id == user.id,
-            tenant_clause(Notification.tenant_id, scope),
-        )
+        .where(Notification.user_id == user.id, _visible(db, user, scope))
         .order_by(Notification.created_at.desc())
         .limit(max(1, min(limit, 200)))
     ).all()
@@ -39,14 +45,14 @@ def list_notifications(
 def unread_count(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     n = db.scalar(
         select(func.count()).select_from(Notification)
         .where(
             Notification.user_id == user.id,
             Notification.read_at.is_(None),
-            tenant_clause(Notification.tenant_id, scope),
+            _visible(db, user, scope),
         )
     ) or 0
     return UnreadCount(unread=n)
@@ -68,14 +74,14 @@ def mark_read(
 def mark_all_read(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     db.execute(
         update(Notification)
         .where(
             Notification.user_id == user.id,
             Notification.read_at.is_(None),
-            tenant_clause(Notification.tenant_id, scope),
+            Notification.tenant_id == scope,
         )
         .values(read_at=datetime.now(timezone.utc))
     )

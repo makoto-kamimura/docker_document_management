@@ -16,7 +16,6 @@ import { colors, radius } from "../theme";
 
 const MATCH_LABEL: Record<string, string> = {
   ocr_text: "本文",
-  summary: "要約",
   title: "タイトル",
 };
 
@@ -25,7 +24,7 @@ function stripTags(s: string | null): string {
   return (s ?? "").replace(/<\/?em>/g, "");
 }
 
-// 全文検索 (F-23〜F-26)。タイトル・OCR本文・要約・タグを横断する。
+// 全文検索 (F-23〜F-26)。タイトル・OCR本文・タグを横断する（ひらがなの読み・OCRの読み違いでも当たる）。
 export function SearchScreen() {
   const navigation = useNavigation<any>();
   const [q, setQ] = useState("");
@@ -55,7 +54,7 @@ export function SearchScreen() {
           style={styles.input}
           value={q}
           onChangeText={setQ}
-          placeholder="本文・要約・タグから探す"
+          placeholder="本文・タイトル・タグから探す"
           placeholderTextColor={colors.textSubtle}
           returnKeyType="search"
           clearButtonMode="while-editing"
@@ -98,7 +97,7 @@ export function SearchScreen() {
             <View style={styles.empty}>
               <Ionicons name={searched ? "document-outline" : "search-outline"} size={40} color={colors.textSubtle} />
               <Text style={styles.emptyText}>
-                {searched ? "一致する結果がありません。" : "タイトル・OCR本文・要約・タグを横断して検索します。"}
+                {searched ? "一致する結果がありません。" : "タイトル・OCR本文・タグを横断して検索します。ひらがな（読み）でも探せます。"}
               </Text>
             </View>
           }

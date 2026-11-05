@@ -13,17 +13,13 @@ export const api = axios.create({
 
 let token: string | null = null;
 let me: User | null = null;
-// 全体管理者(super_admin)が操作対象にしているテナント。一般ユーザーは自分のテナント固定のため未使用。
-let activeTenant: string | null = null;
 export function setToken(t: string) {
   token = t;
   me = null;
-  activeTenant = null;
 }
 export function clearToken() {
   token = null;
   me = null;
-  activeTenant = null;
 }
 export function isAuthenticated() {
   return !!token;
@@ -32,17 +28,9 @@ export function getToken() {
   return token;
 }
 
-export function getActiveTenant() {
-  return activeTenant;
-}
-export function setActiveTenant(tenantId: string | null) {
-  activeTenant = tenantId;
-}
-
-// JWT と（全体管理者なら）操作対象テナントを付与（Web と同じ）
+// JWT を付与。テナントはサーバーが決める（全体管理者は Web のテナント管理で選んだテナント）
 api.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  if (activeTenant) config.headers["X-Tenant-Id"] = activeTenant;
   return config;
 });
 
@@ -105,27 +93,57 @@ export interface User {
   email: string;
   name: string;
   role: "super_admin" | "admin" | "registrar" | "viewer";
-  tenant_id: string | null;
+  tenant_id: string | null;   // 全体管理者は操作中のテナント（未選択なら null）
   tenant_name: string | null;
+  is_child: boolean;
 }
 
-// ログイン中のユーザー（家族の一覧で「自分」を見分けるのに使う）。ログイン中はキャッシュする
-export async function getMe(): Promise<User> {
-  if (me) return me;
+// ログイン中のユーザー（家族の一覧で「自分」を見分けるのに使う）。ログイン中はキャッシュする。
+// refresh で取り直す（全体管理者が Web で操作するテナントを切り替えたときなど）
+export async function getMe(refresh = false): Promise<User> {
+  if (me && !refresh) return me;
   const { data } = await api.get<User>("/auth/me");
   me = data;
   return data;
 }
 
-export interface Tenant {
-  id: string;
-  name: string;
-  is_demo: boolean;
+// 自分の表示名を変える（家族の確認状況・コメントに出る名前）。キャッシュも差し替える
+export async function updateMe(patch: { name: string }): Promise<User> {
+  const { data } = await api.patch<User>("/auth/me", patch);
+  me = data;
+  return data;
 }
 
-// 全体管理者は全テナント、それ以外は自分のテナントだけが返る
-export async function listTenants(): Promise<Tenant[]> {
-  const { data } = await api.get<Tenant[]>("/tenants");
+// ---- カテゴリ（公開範囲つき。Web の api/client.ts と同じ） ----
+
+// 見られる人の範囲。管理者にも適用される（「本人だけ」は登録した本人以外は誰も見られない）
+export type CategoryVisibility = "everyone" | "adults" | "family" | "owner";
+export const VISIBILITY_LABEL: Record<CategoryVisibility, string> = {
+  everyone: "全員",
+  adults: "子供以外",
+  family: "家族",
+  owner: "本人だけ",
+};
+// 撮影の確認画面で、選んだカテゴリの範囲を一行で伝える
+export const VISIBILITY_HELP: Record<CategoryVisibility, string> = {
+  everyone: "家族全員が見られます",
+  adults: "子供は見られません",
+  family: "同じグループの家族と、共有した人が見られます",
+  owner: "自分だけが見られます",
+};
+
+export interface Category {
+  id: string;
+  name: string;
+  visibility: CategoryVisibility;
+  icon: string | null;   // Ionicons の名前（-outline を除いた形）。categoryStyle.tsx
+  color: string | null;  // categoryStyle.tsx の CATEGORY_COLORS の名前
+  document_count: number;
+}
+
+// カテゴリの追加・変更は Web のカテゴリ管理（管理者）で行う
+export async function listCategories(): Promise<Category[]> {
+  const { data } = await api.get<Category[]>("/categories");
   return data;
 }
 
@@ -134,7 +152,11 @@ export async function listTenants(): Promise<Tenant[]> {
 export interface DocumentRead {
   id: string;
   title: string;
-  category: string | null;
+  category_id: string | null;
+  category: string | null;              // カテゴリ名（未分類は null）
+  category_visibility: CategoryVisibility; // 見られる人の範囲（未分類は family）
+  category_icon: string | null;          // カテゴリのアイコン・色（categoryStyle.tsx）
+  category_color: string | null;
   document_type: string | null;
   page_count: number;
   ocr_status: string;
@@ -300,11 +322,10 @@ export async function registerPushToken(token: string, platform: string): Promis
   await api.post("/push-tokens", { token, platform });
 }
 
-// PDF出力の種類（Web と同じ3種）: 検索可能な電子資料PDF(F-14) / OCR全文PDF / 要約PDF
+// PDF出力の種類（Web と同じ2種）: 検索可能な電子資料PDF(F-14) / OCR全文PDF
 export const PDF_EXPORTS = {
   document: { path: "document-pdf", prefix: "document" },
   ocr: { path: "ocr-pdf", prefix: "ocr_text" },
-  summary: { path: "pdf", prefix: "summary" },
 } as const;
 export type PdfKind = keyof typeof PDF_EXPORTS;
 
@@ -324,17 +345,19 @@ export interface UploadPage {
 }
 
 // 撮影画像/取込ファイルのアップロード (F-01/F-02/F-10/F-12)。
-// 複数ページ=1ドキュメント。mode はサーバー側画像処理に渡す。
+// 複数ページ=1ドキュメント。mode はサーバー側画像処理に渡す。categoryId でカテゴリに入れる（未指定は未分類）
 export async function uploadDocument(
   title: string,
   pages: UploadPage[],
   mode: CaptureMode = "color",
+  categoryId: string | null = null,
   sensitivity = "internal"
 ) {
   const form = new FormData();
   form.append("title", title);
   form.append("sensitivity", sensitivity);
   form.append("mode", mode);
+  if (categoryId) form.append("category_id", categoryId);
   pages.forEach((p, i) => {
     form.append("files", {
       uri: p.uri,
@@ -361,7 +384,7 @@ export interface SearchHit {
   matched_in: string | null;
 }
 
-// 全文検索 (F-23〜F-26)。タイトル・OCR本文・要約・タグを横断する。
+// 全文検索 (F-23〜F-26)。タイトル・OCR本文・タグを横断する（ひらがなの読み・OCRの読み違いでも当たる）。
 export async function searchDocuments(q: string): Promise<SearchHit[]> {
   const { data } = await api.get<SearchHit[]>("/search", { params: { q } });
   return data;

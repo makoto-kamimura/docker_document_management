@@ -1,6 +1,8 @@
 """家族での紙の共有・通知（撮影 → OCR → 解析 → 通知 → 家族で確認 → 対応状況の共有）。
 
-- 家族 = ドキュメント所有者と同じグループのメンバー + 個別に共有されたユーザー（所有者を含む）
+- 家族 = ドキュメントを見られる人（所有者を含む）。カテゴリの公開範囲で決まる:
+  全員 = テナントの全員 / 子供以外 = 子供でない全員 / 本人だけ = 所有者のみ /
+  家族（未分類を含む）= 所有者と同じグループのメンバー + 個別に共有されたユーザー
 - 確認済み = 開いた（既読）か「確認した/対応する/対応済み」を選んだ人。「あとで確認」は未確認扱い
 - 通知は未確認の家族にだけ送り、全員が確認したらリマインドは止まる
 """
@@ -15,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import co_member_user_ids
 from app.core.config import settings
+from app.models.category import Category, CategoryVisibility
 from app.models.document import Document, OcrStatus
 from app.models.document_permission import DocumentPermission
 from app.models.family import (
@@ -45,11 +48,42 @@ def is_confirmed(read_at: datetime | None, action: ActionStatus | None) -> bool:
 
 
 def family_ids_map(db: Session, docs: list[Document]) -> dict:
-    """{document_id: [user_id, ...]}（所有者を先頭に、グループの同居メンバーと個別共有先）。"""
+    """{document_id: [user_id, ...]}（所有者を先頭に、その書類を見られる家族）。
+
+    通知・リマインド・確認人数の対象。閲覧の判定（`deps.can_access`）と同じく、カテゴリの
+    公開範囲で決める。「家族」（未分類を含む）は、グループの同居メンバーと個別共有先。
+    管理者は書類を見られても、グループに入っていなければ家族には数えない（従来どおり）。
+    """
     if not docs:
         return {}
+    visibility = {
+        c.id: c.visibility
+        for c in db.scalars(
+            select(Category).where(
+                Category.id.in_({d.category_id for d in docs if d.category_id})
+            )
+        ).all()
+    }
+
+    def visibility_of(d: Document) -> CategoryVisibility:
+        if d.category_id is None:
+            return CategoryVisibility.family
+        return visibility.get(d.category_id, CategoryVisibility.owner)
+
+    # 「全員」「子供以外」の書類があるテナントの全員（登録順）
+    open_to_all = (CategoryVisibility.everyone, CategoryVisibility.adults)
+    wide = {d.tenant_id for d in docs if visibility_of(d) in open_to_all}
+    tenant_users: dict = {}
+    if wide:
+        for uid, tid, child in db.execute(
+            select(User.id, User.tenant_id, User.is_child)
+            .where(User.tenant_id.in_(wide))
+            .order_by(User.created_at.asc())
+        ).all():
+            tenant_users.setdefault(tid, []).append((uid, child))
+
     co: dict = {}
-    for owner in {d.owner_id for d in docs}:
+    for owner in {d.owner_id for d in docs if visibility_of(d) == CategoryVisibility.family}:
         co[owner] = [owner] + [u for u in co_member_user_ids(db, owner) if u != owner]
     grants: dict = {}
     for doc_id, user_id in db.execute(
@@ -60,16 +94,27 @@ def family_ids_map(db: Session, docs: list[Document]) -> dict:
         grants.setdefault(doc_id, []).append(user_id)
     out = {}
     for d in docs:
-        ids = list(co[d.owner_id])
-        ids += [u for u in grants.get(d.id, []) if u not in ids]
+        vis = visibility_of(d)
+        if vis == CategoryVisibility.owner:
+            ids = [d.owner_id]
+        elif vis == CategoryVisibility.family:
+            ids = list(co[d.owner_id])
+            ids += [u for u in grants.get(d.id, []) if u not in ids]
+        else:
+            ids = [d.owner_id] + [
+                u for u, child in tenant_users.get(d.tenant_id, [])
+                if u != d.owner_id and not (child and vis == CategoryVisibility.adults)
+            ]
         out[d.id] = ids
-    # テナントをまたぐ相手は家族に含めない（移行前のデータが残っていた場合の保険）
+    # テナントをまたぐ相手は家族に含めない（移行前のデータが残っていた場合の保険）。
+    # 所有者は常に含める（テナントに所属しない全体管理者が登録した書類もある）
     everyone = {u for ids in out.values() for u in ids}
     tenant_of = dict(
         db.execute(select(User.id, User.tenant_id).where(User.id.in_(everyone))).all()
     ) if everyone else {}
     return {
-        d.id: [u for u in out[d.id] if tenant_of.get(u) == d.tenant_id] for d in docs
+        d.id: [u for u in out[d.id] if u == d.owner_id or tenant_of.get(u) == d.tenant_id]
+        for d in docs
     }
 
 
@@ -120,7 +165,8 @@ def member_statuses(db: Session, doc: Document) -> list[dict]:
 def apply_analysis(db: Session, doc: Document, text: str | None) -> DocumentInsight:
     """OCR テキストを解析して DocumentInsight を保存する（利用者が修正済みなら上書きしない）。
 
-    自動命名のタイトル（資料_123…）は見出し候補に、未設定のカテゴリは推定分類に置き換える。
+    自動命名のタイトル（資料_123…）は見出し候補に、未設定の書類種別は推定分類に置き換える。
+    カテゴリは見られる人を決めるため、自動では付けない。
     """
     ins = db.get(DocumentInsight, doc.id)
     if ins is None:
@@ -138,8 +184,8 @@ def apply_analysis(db: Session, doc: Document, text: str | None) -> DocumentInsi
         ins.reasons = result.reasons
     if result.title and analyze.AUTO_TITLE_RE.match(doc.title or ""):
         doc.title = result.title[:255]
-    if result.category and not doc.category:
-        doc.category = result.category
+    if result.category and not doc.document_type:
+        doc.document_type = result.category
     db.commit()
     return ins
 

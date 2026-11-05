@@ -3,8 +3,8 @@ import axios from "axios";
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 const TOKEN_KEY = "access_token";
-// 全体管理者(super_admin)が操作対象にしているテナント。一般ユーザーは自分のテナント固定のため未使用。
-const TENANT_KEY = "active_tenant";
+// 以前の版が保存していた全体管理者の操作対象テナント。今はサーバー側（テナント管理で切り替え）で持つ
+const LEGACY_TENANT_KEY = "active_tenant";
 
 export const ISSUE_URL = "https://github.com/makoto-kamimura/docker_document_management/issues/new";
 
@@ -12,15 +12,11 @@ export const api = axios.create({
   baseURL: `${baseURL}/api/v1`,
 });
 
-// JWT と（全体管理者なら）操作対象テナントを付与
+// JWT を付与。全体管理者の操作対象テナントはサーバー側で持つ（Web のテナント管理で切り替える）
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
-  }
-  const tenant = localStorage.getItem(TENANT_KEY);
-  if (tenant) {
-    config.headers["X-Tenant-Id"] = tenant;
   }
   return config;
 });
@@ -47,18 +43,7 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(TENANT_KEY);
-}
-
-// ---- 操作対象テナント (super_admin のみ。null = 全テナント横断) ----
-
-export function getActiveTenant(): string | null {
-  return localStorage.getItem(TENANT_KEY);
-}
-
-export function setActiveTenant(tenantId: string | null): void {
-  if (tenantId) localStorage.setItem(TENANT_KEY, tenantId);
-  else localStorage.removeItem(TENANT_KEY);
+  localStorage.removeItem(LEGACY_TENANT_KEY);
 }
 
 export function isAuthenticated(): boolean {
@@ -74,7 +59,11 @@ export interface DocumentRead {
   id: string;
   tenant_id: string | null;
   title: string;
-  category: string | null;
+  category_id: string | null;
+  category: string | null;              // カテゴリ名（未分類は null）
+  category_visibility: CategoryVisibility; // 見られる人の範囲（未分類は family）
+  category_icon: string | null;          // カテゴリのアイコン・色（categoryStyle.tsx）
+  category_color: string | null;
   document_type: string | null;
   page_count: number;
   ocr_status: string;
@@ -103,7 +92,7 @@ export interface DocumentDetail extends DocumentRead {
 
 export interface DocumentUpdate {
   title?: string;
-  category?: string | null;
+  category_id?: string | null;  // null で未分類に戻す
   document_type?: string | null;
   sensitivity?: string;
   tags?: string[];
@@ -149,12 +138,69 @@ export async function listDocuments(): Promise<DocumentRead[]> {
 
 export async function searchDocuments(
   q: string,
-  opts?: { category?: string; tag?: string }
+  opts?: { categoryId?: string; tag?: string }
 ): Promise<SearchHit[]> {
   const { data } = await api.get<SearchHit[]>("/search", {
-    params: { q, category: opts?.category, tag: opts?.tag },
+    params: { q, category_id: opts?.categoryId, tag: opts?.tag },
   });
   return data;
+}
+
+// ---- カテゴリ（公開範囲つき）。一覧は誰でも、追加・変更・削除は管理者のみ ----
+
+// 見られる人の範囲。管理者・全体管理者にも適用される（「本人だけ」は登録した本人以外は誰も見られない）
+export type CategoryVisibility = "everyone" | "adults" | "family" | "owner";
+export const VISIBILITY_LABEL: Record<CategoryVisibility, string> = {
+  everyone: "全員",
+  adults: "子供以外",
+  family: "家族",
+  owner: "本人だけ",
+};
+export const VISIBILITY_HELP: Record<CategoryVisibility, string> = {
+  everyone: "テナントの全員が見られます",
+  adults: "子供の印が付いた人は見られません",
+  family: "登録した人と同じグループの家族・個別に共有した人・管理者が見られます",
+  owner: "登録した本人だけが見られます（管理者も見られません）",
+};
+// 広い順（範囲を広げる変更の確認に使う）
+export const VISIBILITY_ORDER: CategoryVisibility[] = ["owner", "family", "adults", "everyone"];
+
+export interface Category {
+  id: string;
+  name: string;
+  visibility: CategoryVisibility;
+  sort_order: number;
+  icon: string | null;   // Ionicons の名前（-outline を除いた形）。categoryStyle.tsx の一覧から選ぶ
+  color: string | null;  // categoryStyle.tsx の CATEGORY_COLORS の名前
+  created_at: string;
+  document_count: number; // 自分が見られる書類の件数
+}
+
+export async function listCategories(): Promise<Category[]> {
+  const { data } = await api.get<Category[]>("/categories");
+  return data;
+}
+
+export async function createCategory(payload: {
+  name: string;
+  visibility: CategoryVisibility;
+  icon?: string;
+  color?: string;
+}): Promise<Category> {
+  const { data } = await api.post<Category>("/categories", payload);
+  return data;
+}
+
+export async function updateCategory(
+  id: string,
+  patch: { name?: string; visibility?: CategoryVisibility; sort_order?: number; icon?: string; color?: string }
+): Promise<Category> {
+  const { data } = await api.patch<Category>(`/categories/${id}`, patch);
+  return data;
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  await api.delete(`/categories/${id}`);
 }
 
 // ---- メタデータ/OCR編集・バージョン・印刷ログ (F-16/F-17/F-19/F-27) ----
@@ -182,11 +228,10 @@ export async function logPrint(id: string): Promise<void> {
   await api.post(`/documents/${id}/print-log`);
 }
 
-// PDF出力の種類（モバイルと同じ3種）: 検索可能な電子資料PDF(F-14) / OCR全文PDF / 要約PDF
+// PDF出力の種類（モバイルと同じ2種）: 検索可能な電子資料PDF(F-14) / OCR全文PDF
 export const PDF_EXPORTS = {
   document: { path: "document-pdf", prefix: "document" },
   ocr: { path: "ocr-pdf", prefix: "ocr_text" },
-  summary: { path: "pdf", prefix: "summary" },
 } as const;
 export type PdfKind = keyof typeof PDF_EXPORTS;
 
@@ -226,27 +271,36 @@ export interface User {
   email: string;
   name: string;
   role: Role;
-  tenant_id: string | null;   // 全体管理者は null
+  // 所属テナント。/auth/me の全体管理者は操作中のテナント（未選択なら null）
+  tenant_id: string | null;
   tenant_name: string | null;
+  is_child: boolean;          // 子供（公開範囲「子供以外」の書類を見られない）
   created_at: string;
 }
 
+// ユーザーは操作中のテナントに作る。テナント間の移動はテナント管理で行う
 export interface UserCreate {
   email: string;
   name: string;
   role: Role;
   password: string;
-  tenant_id?: string | null;  // 全体管理者のみ指定できる（他は自テナント固定）
+  is_child?: boolean;
 }
 
 export interface UserUpdate {
   name?: string;
   role?: Role;
-  tenant_id?: string;         // テナント移動（全体管理者のみ）
+  is_child?: boolean;
 }
 
 export async function getMe(): Promise<User> {
   const { data } = await api.get<User>("/auth/me");
+  return data;
+}
+
+// 自分の表示名を変える（ログイン中の本人なら誰でも）
+export async function updateMe(patch: { name: string }): Promise<User> {
+  const { data } = await api.patch<User>("/auth/me", patch);
   return data;
 }
 
@@ -293,9 +347,26 @@ export interface TenantCreate {
   is_demo?: boolean;
 }
 
-// 全体管理者は全テナント、それ以外は自分のテナントだけが返る
+// テナントの API はすべて全体管理者のみ（Web のテナント管理からだけ使う）
 export async function listTenants(): Promise<Tenant[]> {
   const { data } = await api.get<Tenant[]>("/tenants");
+  return data;
+}
+
+// 操作中のテナントを切り替える。以後の一覧・撮影・ユーザー管理などはこのテナントの中で動く
+export async function switchTenant(id: string): Promise<Tenant> {
+  const { data } = await api.put<Tenant>("/tenants/active", { tenant_id: id });
+  return data;
+}
+
+export async function listTenantUsers(id: string): Promise<User[]> {
+  const { data } = await api.get<User[]>(`/tenants/${id}/users`);
+  return data;
+}
+
+// ユーザーを別のテナントへ移す（所有ドキュメント・通知も一緒に移る）
+export async function moveUserToTenant(tenantId: string, userId: string): Promise<User> {
+  const { data } = await api.put<User>(`/tenants/${tenantId}/users/${userId}`);
   return data;
 }
 

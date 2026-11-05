@@ -1,13 +1,14 @@
 import uuid
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
-from sqlalchemy import ColumnElement, select, true
+from sqlalchemy import ColumnElement, false, select, true
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
 from app.db.session import get_db
+from app.models.category import Category, CategoryVisibility
 from app.models.document import Document
 from app.models.document_permission import DocumentPermission, PermissionLevel
 from app.models.group import GroupMember
@@ -27,8 +28,8 @@ def get_current_user(
     )
     try:
         payload = decode_token(token)
-        user_id = payload.get("sub")
-    except JWTError:
+        user_id = uuid.UUID(payload.get("sub"))
+    except (JWTError, ValueError, TypeError):
         raise cred_exc
     user = db.get(User, user_id)
     if user is None:
@@ -40,7 +41,7 @@ def get_current_user(
 
 
 def require_role(*roles: Role):
-    """ロールベースのアクセス制御 (F-35, F-37)。super_admin は常に許可。"""
+    """ロールベースのアクセス制御 (F-35, F-37)。super_admin は常に許可（操作中のテナントの中で）。"""
 
     def checker(user: User = Depends(get_current_user)) -> User:
         if user.role != Role.super_admin and user.role not in roles:
@@ -62,51 +63,24 @@ def is_admin(user: User) -> bool:
     return user.role in ADMIN_ROLES
 
 
-def tenant_scope(
-    user: User = Depends(get_current_user),
-    x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id"),
-) -> uuid.UUID | None:
-    """このリクエストで扱うテナント。`None` は全テナント（super_admin のみ）。
+def tenant_scope(user: User = Depends(get_current_user)) -> uuid.UUID:
+    """このリクエストで扱うテナント。
 
-    一般ユーザーは常に自分のテナントに固定される。super_admin だけが `X-Tenant-Id`
-    ヘッダで対象テナントを切り替えられ、未指定なら全テナント横断になる。
+    一般ユーザーは自分のテナント、super_admin は操作中のテナント（Web のテナント管理で切り替える）。
+    テナントをまたぐ操作はテナント管理 (`/tenants`) にだけあり、それ以外は必ず1つのテナントの中で動く。
     """
-    if not is_super_admin(user):
-        return user.tenant_id
-    if x_tenant_id:
-        try:
-            return uuid.UUID(x_tenant_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="X-Tenant-Id が不正です")
-    return None
-
-
-def require_tenant(scope: uuid.UUID | None = Depends(tenant_scope)) -> uuid.UUID:
-    """テナントを特定できないと実行できない操作（作成系）で使う。"""
-    if scope is None:
+    tenant_id = user.scope_tenant_id
+    if tenant_id is None:
         raise HTTPException(
-            status_code=400, detail="対象テナントを指定してください（X-Tenant-Id）"
+            status_code=409,
+            detail="操作するテナントが選ばれていません。Web のテナント管理で選んでください",
         )
-    return scope
-
-
-def tenant_clause(column, scope: uuid.UUID | None) -> ColumnElement[bool]:
-    """一覧・検索クエリへ付けるテナント条件。scope が None（全体管理者）なら無条件。"""
-    return true() if scope is None else column == scope
-
-
-def in_scope(scope: uuid.UUID | None, tenant_id) -> bool:
-    return scope is None or tenant_id == scope
-
-
-def ensure_in_scope(scope: uuid.UUID | None, tenant_id, detail: str = "別のテナントのデータです") -> None:
-    if not in_scope(scope, tenant_id):
-        raise HTTPException(status_code=404, detail=detail)
+    return tenant_id
 
 
 def same_tenant(user: User, tenant_id) -> bool:
-    """user がそのテナントのデータを扱えるか（super_admin は全テナント可）。"""
-    return is_super_admin(user) or user.tenant_id == tenant_id
+    """user がそのテナントのデータを扱えるか（super_admin は操作中のテナントだけ）。"""
+    return tenant_id is not None and user.scope_tenant_id == tenant_id
 
 
 # ---- グループ・ドキュメントのアクセス判定 ----
@@ -138,18 +112,33 @@ def shares_group(db: Session, user_a_id, user_b_id) -> bool:
     return hit is not None
 
 
+def category_visibility(db: Session, doc: Document) -> CategoryVisibility:
+    """ドキュメントの公開範囲。未分類は「家族」、カテゴリが見つからなければ最も狭い「本人だけ」。"""
+    if doc.category_id is None:
+        return CategoryVisibility.family
+    category = db.get(Category, doc.category_id)
+    return category.visibility if category else CategoryVisibility.owner
+
+
 def can_access(db: Session, doc: Document, user: User, need: PermissionLevel) -> bool:
     """ドキュメントに対し user が need 以上の権限を持つか (F-36, F-37)。
 
     最初にテナントを判定する（別テナントの書類は所有者・ACL・ロールに関わらず不可）。
-    同一テナント内では、テナント管理者と所有者は常にフル権限。それ以外は per-user ACL を
-    参照し、閲覧(view)については所有者と共通グループに属していれば許可（グループ自動共有）。
+    次にカテゴリの公開範囲を上限として当てはめる（管理者・全体管理者・個別共有にも適用）:
+    「本人だけ」は所有者のみ、「子供以外」は子供を除く。範囲の中では、管理者と所有者は
+    フル権限、それ以外は per-user ACL を参照し、閲覧(view)は「全員」「子供以外」なら誰でも、
+    「家族」（未分類を含む）なら所有者と共通グループに属していれば許可（グループ自動共有）。
     """
-    if is_super_admin(user):
-        return True
-    if doc.tenant_id != user.tenant_id:
+    if not same_tenant(user, doc.tenant_id):
         return False
-    if user.role == Role.admin or doc.owner_id == user.id:
+    if doc.owner_id == user.id:
+        return True
+    visibility = category_visibility(db, doc)
+    if visibility == CategoryVisibility.owner:
+        return False
+    if visibility == CategoryVisibility.adults and user.is_child:
+        return False
+    if is_admin(user):
         return True
     perm = db.scalar(
         select(DocumentPermission).where(
@@ -159,16 +148,56 @@ def can_access(db: Session, doc: Document, user: User, need: PermissionLevel) ->
     )
     if perm is not None and perm.level.covers(need):
         return True
-    if need == PermissionLevel.view and shares_group(db, user.id, doc.owner_id):
+    if need != PermissionLevel.view:
+        return False
+    if visibility in (CategoryVisibility.everyone, CategoryVisibility.adults):
         return True
-    return False
+    return shares_group(db, user.id, doc.owner_id)
+
+
+def visible_documents_clause(db: Session, user: User) -> ColumnElement[bool]:
+    """user が閲覧できるドキュメントの条件（`can_access` の view と同じ判定を SQL にしたもの）。
+
+    一覧・検索・ログ・通知の絞り込みで使う。テナントの条件も含む。
+    """
+    tenant_id = user.scope_tenant_id
+    if tenant_id is None:
+        return false()
+
+    def categories(*visibility: CategoryVisibility):
+        return select(Category.id).where(
+            Category.tenant_id == tenant_id, Category.visibility.in_(visibility)
+        )
+
+    if is_admin(user):
+        family_rule: ColumnElement[bool] = true()
+    else:
+        granted = select(DocumentPermission.document_id).where(
+            DocumentPermission.user_id == user.id
+        )
+        family_rule = Document.id.in_(granted) | Document.owner_id.in_(
+            co_member_user_ids(db, user.id)  # 自分を含む同一グループの全員
+        )
+    open_to = [CategoryVisibility.everyone]
+    if not user.is_child:
+        open_to.append(CategoryVisibility.adults)
+    return (Document.tenant_id == tenant_id) & (
+        (Document.owner_id == user.id)
+        | Document.category_id.in_(categories(*open_to))
+        | (
+            (Document.category_id.is_(None)
+             | Document.category_id.in_(categories(CategoryVisibility.family)))
+            & family_rule
+        )
+    )
 
 
 def ensure_can_access(
     db: Session, doc: Document, user: User, need: PermissionLevel = PermissionLevel.view
 ) -> None:
-    """権限が無ければ 403（別テナントなら存在を伏せて 404）を送出する。"""
-    if not same_tenant(user, doc.tenant_id):
+    """見られない書類（別テナント・公開範囲や共有の外）は存在を伏せて 404、
+    見られるが need の権限が無ければ 403 を送出する。"""
+    if not can_access(db, doc, user, PermissionLevel.view):
         raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
-    if not can_access(db, doc, user, need):
+    if need != PermissionLevel.view and not can_access(db, doc, user, need):
         raise HTTPException(status_code=403, detail="このドキュメントへのアクセス権がありません")

@@ -1,10 +1,12 @@
-import { useCallback, useState } from "react";
-import { View, Text, FlatList, ScrollView, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
+import { useCallback, useLayoutEffect, useState } from "react";
+import { View, Text, FlatList, StyleSheet, RefreshControl, TouchableOpacity } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { listDocuments, OCR_LABEL, type DocumentRead } from "../api/client";
+import { listCategories, listDocuments, OCR_LABEL, type Category, type DocumentRead } from "../api/client";
+import { AccountButton } from "../components/AccountButton";
 import { DocThumb } from "../components/DocThumb";
-import { DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
+import { categoryColor, categoryIconName } from "../categoryStyle";
+import { CategoryChip, DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
 import { colors, radius } from "../theme";
 
 // 家に届いた紙の箱: 未読 / 重要 / 期限あり で見逃しを防ぐ（Web の一覧と同じ区分）
@@ -20,9 +22,13 @@ const FILTERS: { key: Filter; label: string; match: (d: DocumentRead) => boolean
 ];
 
 // ドキュメント一覧・閲覧 (F-21, F-22, F-32)
+// 上から カテゴリ（折り返して全部見せる）→ 状態（等幅で1行）→ 一覧。幅の狭い端末でも横スクロールなし。
 export function DocumentListScreen() {
   const navigation = useNavigation<any>();
   const [docs, setDocs] = useState<DocumentRead[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  // カテゴリの絞り込み（"all" = すべて、"none" = 未分類、それ以外はカテゴリID）
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [view, setView] = useState<ViewMode>("list");
@@ -33,12 +39,50 @@ export function DocumentListScreen() {
       .then(setDocs)
       .catch(() => {})
       .finally(() => setRefreshing(false));
+    listCategories().then(setCategories).catch(() => {});
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // 一覧/サムネイルの切替はヘッダー右へ（絞り込みの幅を空けるため）
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.viewBtn}
+            onPress={() => setView((v) => (v === "list" ? "grid" : "list"))}
+            accessibilityLabel={view === "list" ? "サムネイル表示" : "一覧表示"}
+          >
+            <Ionicons name={view === "list" ? "grid-outline" : "list-outline"} size={21} color={colors.textMuted} />
+          </TouchableOpacity>
+          <AccountButton />
+        </View>
+      ),
+    });
+  }, [navigation, view]);
+
   const current = FILTERS.find((f) => f.key === filter)!;
-  const shown = docs.filter(current.match);
+  const inCategory = (d: DocumentRead) =>
+    categoryFilter === "all" || (categoryFilter === "none" ? !d.category_id : d.category_id === categoryFilter);
+  const shown = docs.filter((d) => current.match(d) && inCategory(d));
+  const categoryTabs: { key: string; label: string; n: number; icon: string; tone: { fg: string; bg: string }; filled?: boolean }[] = [
+    { key: "all", label: "すべて", n: 0, icon: "apps", tone: { fg: colors.primary, bg: colors.primarySoft } },
+    ...categories.map((c) => ({
+      key: c.id,
+      label: c.name,
+      n: docs.filter((d) => d.category_id === c.id).length,
+      icon: categoryIconName(c.icon),
+      tone: categoryColor(c.color),
+    })),
+    {
+      key: "none",
+      label: "未分類",
+      n: docs.filter((d) => !d.category_id).length,
+      icon: "folder-open-outline",
+      tone: { fg: colors.textMuted, bg: colors.surfaceMuted },
+    },
+  ];
   const countOf = (f: (typeof FILTERS)[number]) => (f.key === "all" || f.key === "read" ? 0 : docs.filter(f.match).length);
 
   const open = (item: DocumentRead) =>
@@ -53,31 +97,63 @@ export function DocumentListScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <View style={styles.tabsRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-          {FILTERS.map((f) => {
-            const n = countOf(f);
-            const active = filter === f.key;
+      {/* カテゴリ: アイコンつきのチップを折り返して全部見せる */}
+      {categories.length > 0 && (
+        <View style={styles.catWrap}>
+          {categoryTabs.map((c) => {
+            const active = categoryFilter === c.key;
             return (
-              <TouchableOpacity key={f.key} style={[styles.tab, active && styles.tabActive]} onPress={() => setFilter(f.key)}>
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{f.label}</Text>
-                {n > 0 && (
-                  <View style={[styles.count, active && styles.countActive]}>
-                    <Text style={[styles.countText, active && styles.countTextActive]}>{n}</Text>
-                  </View>
-                )}
+              <TouchableOpacity
+                key={c.key}
+                style={[styles.cat, active && { backgroundColor: c.tone.bg, borderColor: c.tone.fg }]}
+                onPress={() => setCategoryFilter(c.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`カテゴリ ${c.label}${c.n > 0 ? ` ${c.n}件` : ""}`}
+              >
+                <View style={[styles.catIcon, { backgroundColor: active ? "#fff" : c.tone.bg }]}>
+                  <Ionicons name={c.icon as any} size={14} color={c.tone.fg} />
+                </View>
+                <Text style={[styles.catText, active && { color: c.tone.fg }]} numberOfLines={1}>
+                  {c.label}
+                </Text>
+                {c.n > 0 && <Text style={[styles.catCount, active && { color: c.tone.fg }]}>{c.n}</Text>}
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
-        {/* 一覧/サムネイル 切替 */}
-        <TouchableOpacity
-          style={styles.viewBtn}
-          onPress={() => setView(view === "list" ? "grid" : "list")}
-          accessibilityLabel={view === "list" ? "サムネイル表示" : "一覧表示"}
-        >
-          <Ionicons name={view === "list" ? "grid-outline" : "list-outline"} size={20} color={colors.textMuted} />
-        </TouchableOpacity>
+        </View>
+      )}
+
+      {/* 状態: 等幅のセグメントで1行に収める（件数は右上の小さなバッジ） */}
+      <View style={styles.segment}>
+        {FILTERS.map((f) => {
+          const n = countOf(f);
+          const active = filter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.segBtn, active && styles.segBtnActive]}
+              onPress={() => setFilter(f.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${f.label}${n > 0 ? ` ${n}件` : ""}`}
+            >
+              <Text
+                style={[styles.segText, active && styles.segTextActive]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
+              >
+                {f.label}
+              </Text>
+              {n > 0 && (
+                <View style={[styles.segCount, active && styles.segCountActive]}>
+                  <Text style={[styles.segCountText, active && styles.segCountTextActive]}>{n > 99 ? "99+" : n}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {view === "list" ? (
@@ -97,6 +173,12 @@ export function DocumentListScreen() {
                   {item.title}
                 </Text>
                 <View style={styles.meta}>
+                  <CategoryChip
+                    name={item.category}
+                    visibility={item.category_visibility}
+                    icon={item.category_icon}
+                    color={item.category_color}
+                  />
                   <ImportanceBadge importance={item.importance} />
                   <DeadlineChip deadline={item.deadline} />
                   {item.family_total > 1 && (
@@ -145,25 +227,52 @@ export function DocumentListScreen() {
 }
 
 const styles = StyleSheet.create({
-  tabsRow: { flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 8, paddingVertical: 8 },
-  tabs: { gap: 8, paddingRight: 8 },
-  tab: {
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 4 },
+  viewBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
+  catWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 10 },
+  cat: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    gap: 5,
+    paddingLeft: 4,
+    paddingRight: 10,
+    paddingVertical: 4,
     borderRadius: radius.pill,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    maxWidth: "100%",
   },
-  tabActive: { backgroundColor: colors.primarySoft },
-  tabText: { color: colors.textMuted, fontWeight: "600", fontSize: 13 },
-  tabTextActive: { color: colors.primary },
-  count: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, backgroundColor: colors.border, alignItems: "center", justifyContent: "center" },
-  countActive: { backgroundColor: colors.primary },
-  countText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
-  countTextActive: { color: "#fff" },
-  viewBtn: { width: 38, height: 34, alignItems: "center", justifyContent: "center" },
+  catIcon: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  catText: { color: colors.text, fontWeight: "600", fontSize: 13, flexShrink: 1 },
+  catCount: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
+  segment: {
+    flexDirection: "row",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: 3,
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  segBtn: { flex: 1, paddingVertical: 8, paddingHorizontal: 2, borderRadius: radius.sm, alignItems: "center" },
+  segBtnActive: { backgroundColor: colors.surface },
+  segText: { color: colors.textMuted, fontWeight: "600", fontSize: 13 },
+  segTextActive: { color: colors.primary, fontWeight: "700" },
+  segCount: {
+    position: "absolute",
+    top: 1,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  segCountActive: { backgroundColor: colors.primary },
+  segCountText: { fontSize: 10, fontWeight: "700", color: colors.textMuted },
+  segCountTextActive: { color: "#fff" },
   listContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24, flexGrow: 1 },
   row: {
     flexDirection: "row",

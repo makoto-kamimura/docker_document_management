@@ -11,6 +11,7 @@ interface PendingItem {
   id: string;
   title: string;
   mode: CaptureMode;
+  categoryId?: string | null; // 旧形式のキューには無い（未分類で送る）
   files: string[]; // 永続化したページのローカルuri
   // 各ページの元ファイル名/MIME（PDF取込を JPEG として再送しないため）。旧形式のキューには無い
   meta?: { name?: string; type?: string }[];
@@ -38,7 +39,8 @@ export async function pendingCount(): Promise<number> {
 export async function enqueueUpload(
   title: string,
   pages: UploadPage[],
-  mode: CaptureMode
+  mode: CaptureMode,
+  categoryId: string | null
 ): Promise<void> {
   const dir = pendingDir();
   try {
@@ -61,7 +63,7 @@ export async function enqueueUpload(
   }
   const meta = pages.map((p) => ({ name: p.name, type: p.type }));
   const items = await readQueue();
-  items.push({ id, title, mode, files, meta, createdAt: Date.now() });
+  items.push({ id, title, mode, categoryId, files, meta, createdAt: Date.now() });
   await writeQueue(items);
 }
 
@@ -78,7 +80,7 @@ export async function flushQueue(): Promise<{ sent: number; remaining: number; e
         name: item.meta?.[i]?.name ?? `page_${i}.jpg`,
         type: item.meta?.[i]?.type ?? "image/jpeg",
       }));
-      await uploadDocument(item.title, pages, item.mode);
+      await uploadDocument(item.title, pages, item.mode, item.categoryId ?? null);
       // 成功 → ファイル削除
       for (const f of item.files) {
         try {

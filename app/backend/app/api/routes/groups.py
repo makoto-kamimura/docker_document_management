@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_role, require_tenant, tenant_clause, tenant_scope
+from app.api.deps import require_role, tenant_scope
 from app.db.session import get_db
 from app.models.group import Group, GroupMember
 from app.models.user import User, Role
@@ -33,18 +33,18 @@ def _to_read(db: Session, group: Group) -> GroupRead:
     )
 
 
-def _load(db: Session, group_id: uuid.UUID, scope: uuid.UUID | None) -> Group:
+def _load(db: Session, group_id: uuid.UUID, scope: uuid.UUID) -> Group:
     group = db.get(Group, group_id)
-    if group is None or (scope is not None and group.tenant_id != scope):
+    if group is None or group.tenant_id != scope:
         raise HTTPException(status_code=404, detail="グループが見つかりません")
     return group
 
 
 @router.get("", response_model=list[GroupRead])
-def list_groups(db: Session = Depends(get_db), scope: uuid.UUID | None = Depends(tenant_scope)):
+def list_groups(db: Session = Depends(get_db), scope: uuid.UUID = Depends(tenant_scope)):
     groups = db.scalars(
         select(Group)
-        .where(tenant_clause(Group.tenant_id, scope))
+        .where(Group.tenant_id == scope)
         .order_by(Group.created_at.asc())
     ).all()
     return [_to_read(db, g) for g in groups]
@@ -54,7 +54,7 @@ def list_groups(db: Session = Depends(get_db), scope: uuid.UUID | None = Depends
 def create_group(
     payload: GroupCreate,
     db: Session = Depends(get_db),
-    tenant_id: uuid.UUID = Depends(require_tenant),
+    tenant_id: uuid.UUID = Depends(tenant_scope),
 ):
     if db.scalar(
         select(Group).where(Group.tenant_id == tenant_id, Group.name == payload.name)
@@ -72,7 +72,7 @@ def update_group(
     group_id: uuid.UUID,
     payload: GroupUpdate,
     db: Session = Depends(get_db),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     group = _load(db, group_id, scope)
     if payload.name is not None and payload.name != group.name:
@@ -92,7 +92,7 @@ def update_group(
 def delete_group(
     group_id: uuid.UUID,
     db: Session = Depends(get_db),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     db.delete(_load(db, group_id, scope))
     db.commit()
@@ -102,7 +102,7 @@ def delete_group(
 def list_members(
     group_id: uuid.UUID,
     db: Session = Depends(get_db),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     _load(db, group_id, scope)
     rows = db.execute(
@@ -121,7 +121,7 @@ def add_member(
     group_id: uuid.UUID,
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     group = _load(db, group_id, scope)
     user = db.get(User, user_id)
@@ -144,7 +144,7 @@ def remove_member(
     group_id: uuid.UUID,
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
-    scope: uuid.UUID | None = Depends(tenant_scope),
+    scope: uuid.UUID = Depends(tenant_scope),
 ):
     _load(db, group_id, scope)
     member = db.scalar(

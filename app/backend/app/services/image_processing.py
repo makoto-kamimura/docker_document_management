@@ -115,6 +115,36 @@ def prepare_for_ocr(gray: np.ndarray) -> tuple[np.ndarray, float]:
     return out, scale
 
 
+def _enhance_gray(gray: np.ndarray) -> np.ndarray:
+    """グレーの仕上げ（CLAHE で明るさ・コントラストを整える）。"""
+    return cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+
+
+def binarize(gray: np.ndarray) -> np.ndarray:
+    """白黒モードの仕上げ（ノイズ除去 + 適応的二値化）。表示用。OCR にはこれを渡さない。
+
+    二値化した画像を Tesseract に読ませると、細い字のかすれや向きの誤判定で文字誤り率が
+    大きく上がる（scripts/ocr_eval.py の結果）。OCR はグレーで行い、PDF の画像だけを
+    あとで白黒にする（pdf_export.binarize_pdf_images）。
+    """
+    gray = cv2.fastNlMeansDenoising(gray, None, 10)
+    return cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
+    )
+
+
+def gray_for_ocr(source: bytes) -> bytes:
+    """台形補正だけをした画像（scan_page_with_ocr_source の3つ目）を、OCR 用のグレーにする。
+
+    白黒モードの検索可能 PDF は、これを OCR してから画像を白黒にする（位置は変わらない）。
+    """
+    img = cv2.imdecode(np.frombuffer(source, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return source
+    ok, buf = cv2.imencode(".jpg", _enhance_gray(img), [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return buf.tobytes() if ok else source
+
+
 def _compute_quality(gray: np.ndarray) -> dict:
     """品質指標と警告(ブレ/暗さ/明るすぎ/影ムラ/低解像度)を算出 (F-09/F-07)。"""
     h, w = gray.shape[:2]
@@ -149,15 +179,26 @@ def _compute_quality(gray: np.ndarray) -> dict:
 
 
 def scan_page(image_bytes: bytes, mode: str = MODE_COLOR) -> tuple[bytes, dict]:
-    """1ページ分の画像をスキャン処理し、(処理後JPEG/PNGバイト, 品質dict) を返す。
+    """1ページ分の画像をスキャン処理し、(処理後JPEG/PNGバイト, 品質dict) を返す。"""
+    out, quality, _ = scan_page_with_ocr_source(image_bytes, mode)
+    return out, quality
 
+
+def scan_page_with_ocr_source(
+    image_bytes: bytes, mode: str = MODE_COLOR
+) -> tuple[bytes, dict, bytes | None]:
+    """スキャン処理し、(処理後JPEG/PNGバイト, 品質dict, 台形補正だけの画像) を返す。
+
+    3つ目は、台形補正・トリミングだけをした色付きの JPEG（高画質）。表示用の仕上げ（白黒の
+    二値化など）をかける前の画像で、PaddleOCR での本文の読み取り（paddle_ocr）と、白黒モードの
+    OCR 用のグレー（gray_for_ocr）に使う。
     処理に失敗した場合は元画像を返しフォールバックする（堅牢性優先）。
     """
     mode = mode if mode in VALID_MODES else MODE_COLOR
     arr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
-        return image_bytes, {"warnings": ["decode_failed"]}
+        return image_bytes, {"warnings": ["decode_failed"]}, None
 
     # 元画像の品質（再撮影判定は補正前の状態で評価する）
     quality = _compute_quality(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
@@ -173,26 +214,24 @@ def scan_page(image_bytes: bytes, mode: str = MODE_COLOR) -> tuple[bytes, dict]:
     except Exception:
         pass
 
+    ok_src, src_buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    ocr_source = src_buf.tobytes() if ok_src else None
+
     # モード別の仕上げ
     try:
         if mode == MODE_BW:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            gray = cv2.fastNlMeansDenoising(gray, None, 10)
-            out = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
-            )
+            out = binarize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
             ok, buf = cv2.imencode(".png", out)
         elif mode == MODE_GRAY:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+            gray = _enhance_gray(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
             ok, buf = cv2.imencode(".jpg", gray, [cv2.IMWRITE_JPEG_QUALITY, 90])
         else:
             out = _enhance_color(img)
             ok, buf = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 90])
         if ok:
             quality["mode"] = mode
-            return buf.tobytes(), quality
+            return buf.tobytes(), quality, ocr_source
     except Exception:
         pass
 
-    return image_bytes, quality
+    return image_bytes, quality, ocr_source

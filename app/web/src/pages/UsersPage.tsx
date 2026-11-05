@@ -5,26 +5,22 @@ import {
   updateUser,
   resetUserPassword,
   deleteUser,
-  listTenants,
   apiErrorMessage as errMsg,
   ASSIGNABLE_ROLES as ROLES,
   ROLE_LABEL,
-  type Tenant,
   type User,
   type Role,
 } from "../api/client";
 import { useMe } from "../me";
 
-// ユーザー・権限のマスタ管理 (F-35, F-38)
+// ユーザー・権限のマスタ管理 (F-35, F-38)。操作中のテナントのユーザーだけを扱う
+// （全体管理者も同じ。テナント間の移動はテナント管理で行う）
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const { me } = useMe();
+  const { me, setMe } = useMe();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  // 全体管理者はテナントをまたいで一覧するため、所属テナントの列と移動操作を出す
-  const isSuper = me?.role === "super_admin";
 
   function reload() {
     return listUsers()
@@ -34,13 +30,9 @@ export function UsersPage() {
 
   useEffect(() => {
     reload().finally(() => setLoading(false));
-    listTenants().then(setTenants).catch(() => setTenants([]));
   }, []);
 
   const admins = users.filter((u) => u.role === "admin");
-  // 「最後の管理者」の判定はテナントごと
-  const adminCountOf = (tenantId: string | null) =>
-    admins.filter((u) => u.tenant_id === tenantId).length;
 
   async function changeRole(u: User, role: Role) {
     try {
@@ -51,22 +43,25 @@ export function UsersPage() {
     }
   }
 
-  async function changeTenant(u: User, tenantId: string) {
-    const t = tenants.find((x) => x.id === tenantId);
-    if (!t) return;
-    if (
-      !window.confirm(
-        `「${u.name}」を テナント「${t.name}」へ移動しますか？\n` +
-          "本人が登録したドキュメントと通知も一緒に移ります。" +
-          "テナントをまたぐグループ所属・個別共有は解除されます。"
-      )
-    )
-      return;
+  // 子供の印。公開範囲が「子供以外」のカテゴリの書類が見えなくなる
+  async function changeChild(u: User, isChild: boolean) {
     try {
-      const updated = await updateUser(u.id, { tenant_id: tenantId });
+      const updated = await updateUser(u.id, { is_child: isChild });
       setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
     } catch (e: any) {
-      alert(errMsg(e, "テナントの変更に失敗しました。"));
+      alert(errMsg(e, "子供の設定の変更に失敗しました。"));
+    }
+  }
+
+  async function onRename(u: User) {
+    const next = window.prompt("表示名", u.name)?.trim();
+    if (!next || next === u.name) return;
+    try {
+      const updated = await updateUser(u.id, { name: next });
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)));
+      if (me?.id === u.id) setMe({ ...me, name: updated.name }); // サイドバーの名前も変える
+    } catch (e: any) {
+      alert(errMsg(e, "名前の変更に失敗しました。"));
     }
   }
 
@@ -112,12 +107,6 @@ export function UsersPage() {
             <div className="label">管理者</div>
             <div className="value">{admins.length}</div>
           </div>
-          {isSuper && (
-            <div className="stat">
-              <div className="label">テナント</div>
-              <div className="value">{tenants.length}</div>
-            </div>
-          )}
         </div>
         <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
           ＋ ユーザーを追加
@@ -132,8 +121,8 @@ export function UsersPage() {
             <tr>
               <th>氏名</th>
               <th>メールアドレス</th>
-              {isSuper && <th>テナント</th>}
               <th>ロール</th>
+              <th title="「子供以外」のカテゴリの書類を見られません">子供</th>
               <th>作成日</th>
               <th style={{ textAlign: "right" }}>操作</th>
             </tr>
@@ -141,7 +130,7 @@ export function UsersPage() {
           <tbody>
             {users.map((u) => {
               const isSelf = me?.id === u.id;
-              const isLastAdmin = u.role === "admin" && adminCountOf(u.tenant_id) <= 1;
+              const isLastAdmin = u.role === "admin" && admins.length <= 1;
               const isSuperUser = u.role === "super_admin";
               const lockRole = isSelf || isLastAdmin || isSuperUser;
               return (
@@ -151,25 +140,6 @@ export function UsersPage() {
                     {isSelf && <span className="tag-self">あなた</span>}
                   </td>
                   <td>{u.email}</td>
-                  {isSuper && (
-                    <td>
-                      {isSuperUser ? (
-                        <span className="muted">（全テナント）</span>
-                      ) : (
-                        <select
-                          className="select"
-                          value={u.tenant_id ?? ""}
-                          onChange={(e) => changeTenant(u, e.target.value)}
-                        >
-                          {tenants.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                  )}
                   <td>
                     {isSuperUser ? (
                       ROLE_LABEL[u.role]
@@ -189,8 +159,20 @@ export function UsersPage() {
                       </select>
                     )}
                   </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={u.is_child}
+                      disabled={isSuperUser}
+                      aria-label={`${u.name}を子供にする`}
+                      onChange={(e) => changeChild(u, e.target.checked)}
+                    />
+                  </td>
                   <td>{new Date(u.created_at).toLocaleDateString("ja-JP")}</td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button className="btn btn-sm" onClick={() => onRename(u)}>
+                      名前変更
+                    </button>
                     <button className="btn btn-sm" onClick={() => onResetPassword(u)}>
                       PWリセット
                     </button>
@@ -212,7 +194,6 @@ export function UsersPage() {
 
       {showCreate && (
         <CreateUserModal
-          tenants={isSuper ? tenants : []}
           onClose={() => setShowCreate(false)}
           onCreated={(u) => {
             setUsers((prev) => [...prev, u]);
@@ -224,19 +205,18 @@ export function UsersPage() {
   );
 }
 
+// 作成したユーザーは操作中のテナントに所属する
 function CreateUserModal({
-  tenants,
   onClose,
   onCreated,
 }: {
-  tenants: Tenant[];   // 空なら所属は自テナント固定（テナント管理者）
   onClose: () => void;
   onCreated: (u: User) => void;
 }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("viewer");
-  const [tenantId, setTenantId] = useState<string>(tenants[0]?.id ?? "");
+  const [isChild, setIsChild] = useState(false);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,7 +231,7 @@ function CreateUserModal({
         name: name.trim(),
         role,
         password,
-        tenant_id: tenants.length ? tenantId : undefined,
+        is_child: isChild,
       });
       onCreated(u);
     } catch (e: any) {
@@ -275,18 +255,6 @@ function CreateUserModal({
           <label>氏名</label>
           <input className="input" required value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        {tenants.length > 0 && (
-          <div className="field">
-            <label>所属テナント</label>
-            <select className="select" value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
-              {tenants.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
         <div className="field">
           <label>ロール</label>
           <select className="select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
@@ -297,6 +265,10 @@ function CreateUserModal({
             ))}
           </select>
         </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+          <input type="checkbox" checked={isChild} onChange={(e) => setIsChild(e.target.checked)} />
+          子供（公開範囲が「子供以外」のカテゴリの書類を見られません）
+        </label>
         <div className="field">
           <label>初期パスワード（4文字以上）</label>
           <input className="input" type="text" required minLength={4} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="管理者が設定" />

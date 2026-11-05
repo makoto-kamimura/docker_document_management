@@ -6,14 +6,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.seed import init_db
 from app.api.routes import (
-    health, auth, documents, family, notifications, search, logs, tenants, users, groups,
-    storage,
+    health, auth, categories, documents, family, notifications, search, logs, tenants, users,
+    groups, storage,
 )
 from app.services.storage import ensure_buckets
 
 # create_all がメタデータを認識できるよう全モデルを import する
 from app.models import tenant as _tenant  # noqa: F401
 from app.models import user as _user  # noqa: F401
+from app.models import category as _category  # noqa: F401
 from app.models import document as _document  # noqa: F401
 from app.models import access_log as _access_log  # noqa: F401
 from app.models import document_permission as _document_permission  # noqa: F401
@@ -49,6 +50,7 @@ app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(tenants.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)
+app.include_router(categories.router, prefix=settings.api_v1_prefix)
 app.include_router(documents.router, prefix=settings.api_v1_prefix)
 app.include_router(family.router, prefix=settings.api_v1_prefix)
 app.include_router(notifications.router, prefix=settings.api_v1_prefix)

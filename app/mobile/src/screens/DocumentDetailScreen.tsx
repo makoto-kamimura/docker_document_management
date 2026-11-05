@@ -5,11 +5,15 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useHeaderHeight } from "@react-navigation/elements";
 import * as Sharing from "expo-sharing";
 import {
   downloadAuthed,
@@ -18,11 +22,14 @@ import {
   type DocumentRead,
   type PdfKind,
 } from "../api/client";
-import { DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
+import { CategoryChip, DeadlineChip, ImportanceBadge } from "../components/FamilyBadges";
+import { ActionBar } from "../components/ActionBar";
 import { FamilyPanel } from "../components/FamilyPanel";
+import { ImageViewer } from "../components/ImageViewer";
+import { useDocFamily } from "../components/useDocFamily";
 import { colors, radius } from "../theme";
 
-// PDF出力ボタン（Web ビューアと同じ3種・同じ文言）
+// PDF出力ボタン（Web ビューアと同じ2種・同じ文言）
 const PDF_BUTTONS: {
   kind: PdfKind;
   label: string;
@@ -44,19 +51,13 @@ const PDF_BUTTONS: {
     dialogTitle: "OCRテキストPDFを保存/送信",
     notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
   },
-  {
-    kind: "summary",
-    label: "要約PDFを出力",
-    icon: "sparkles-outline",
-    dialogTitle: "要約PDFを保存/送信",
-    notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
-  },
 ];
 
 // ドキュメント詳細・画像プレビュー・家族での確認・PDF出力 (F-22, F-14系)
 // 開いた時点で詳細を取得し、閲覧ログ記録・既読化を行う（Web ビューアと同じ, F-28/F-32）。
 // 通知から開いた場合はタイトルが無いので、取得した詳細のタイトルで見出しを更新する。
-export function DocumentDetailScreen({ route }: any) {
+// 画像はタップで全画面（ピンチで拡大）。画面下のバーでコメントと「あなたの対応」を送り、一覧へ戻る。
+export function DocumentDetailScreen({ route, navigation }: any) {
   const { id, title: initialTitle } = route.params as { id: string; title?: string };
   const [title, setTitle] = useState(initialTitle ?? "");
   const [familyKey, setFamilyKey] = useState(0);
@@ -68,6 +69,9 @@ export function DocumentDetailScreen({ route }: any) {
   const [busy, setBusy] = useState<PdfKind | null>(null);
   const [pageCount, setPageCount] = useState(1);
   const [page, setPage] = useState(0);
+  const [viewer, setViewer] = useState(false);
+  const family = useDocFamily(id, familyKey);
+  const headerHeight = useHeaderHeight();
 
   // 総ページ数を取得（複数枚は各ページを切り替えて表示できるようにする）
   useEffect(() => {
@@ -100,6 +104,12 @@ export function DocumentDetailScreen({ route }: any) {
     loadImage(page);
   }, [loadImage, page]);
 
+  // 対応を押したら、開く前の一覧（書類・検索・お知らせなど）へ戻る
+  function backToList() {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate("Main", { screen: "Documents" });
+  }
+
   async function downloadAndShare(b: (typeof PDF_BUTTONS)[number]) {
     setBusy(b.kind);
     try {
@@ -127,76 +137,122 @@ export function DocumentDetailScreen({ route }: any) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-      <Text style={styles.title}>{title}</Text>
-      {doc && (doc.importance === "high" || doc.deadline) && (
-        <View style={styles.headChips}>
-          <ImportanceBadge importance={doc.importance} />
-          <DeadlineChip deadline={doc.deadline} />
-        </View>
-      )}
-
-      <View style={styles.imageBox}>
-        {loadingImage ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : imageError ? (
-          <View style={{ alignItems: "center", gap: 8 }}>
-            <Ionicons name="image-outline" size={32} color={colors.textSubtle} />
-            <Text style={styles.error}>{imageError}</Text>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={headerHeight}
+    >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>{title}</Text>
+        {doc && (doc.importance === "high" || doc.deadline || doc.category) && (
+          <View style={styles.headChips}>
+            <CategoryChip
+              name={doc.category}
+              visibility={doc.category_visibility}
+              icon={doc.category_icon}
+              color={doc.category_color}
+            />
+            <ImportanceBadge importance={doc.importance} />
+            <DeadlineChip deadline={doc.deadline} />
           </View>
-        ) : imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.image} resizeMode="contain" />
-        ) : null}
-      </View>
+        )}
 
-      {/* 複数ページのページ送り (F-22) */}
-      {pageCount > 1 && (
-        <View style={styles.pager}>
-          <TouchableOpacity
-            style={styles.pagerBtn}
-            disabled={page <= 0}
-            onPress={() => setPage((p) => Math.max(0, p - 1))}
-            accessibilityLabel="前のページ"
-          >
-            <Ionicons name="chevron-back" size={18} color={page <= 0 ? colors.border : colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.pagerLabel}>{page + 1} / {pageCount}</Text>
-          <TouchableOpacity
-            style={styles.pagerBtn}
-            disabled={page >= pageCount - 1}
-            onPress={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-            accessibilityLabel="次のページ"
-          >
-            <Ionicons name="chevron-forward" size={18} color={page >= pageCount - 1 ? colors.border : colors.text} />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* 家族での確認: 解析結果 / 自分の対応 / 家族の確認状況・再通知 / コメント */}
-      <FamilyPanel docId={id} reloadKey={familyKey} />
-
-      <Text style={styles.section}>保存・共有</Text>
-      <View style={styles.card}>
-        {PDF_BUTTONS.map((b, i) => (
-          <TouchableOpacity
-            key={b.kind}
-            style={[styles.pdfRow, i > 0 && styles.pdfRowBorder]}
-            onPress={() => downloadAndShare(b)}
-            disabled={busy !== null}
-          >
-            <View style={styles.pdfIcon}>
-              <Ionicons name={b.icon} size={18} color={colors.primary} />
+        <Pressable
+          style={styles.imageBox}
+          onPress={() => setViewer(true)}
+          disabled={!imageUri || loadingImage || !!imageError}
+          accessibilityRole="imagebutton"
+          accessibilityLabel="画像を全画面で表示"
+        >
+          {loadingImage ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : imageError ? (
+            <View style={{ alignItems: "center", gap: 8 }}>
+              <Ionicons name="image-outline" size={32} color={colors.textSubtle} />
+              <Text style={styles.error}>{imageError}</Text>
             </View>
-            <Text style={styles.pdfLabel}>{b.label}</Text>
-            {busy === b.kind ? (
-              <ActivityIndicator color={colors.primary} />
-            ) : (
-              <Ionicons name="share-outline" size={18} color={colors.textSubtle} />
-            )}
-          </TouchableOpacity>
-        ))}
-      </View>
-    </ScrollView>
+          ) : imageUri ? (
+            <>
+              <Image source={{ uri: imageUri }} style={styles.image} resizeMode="contain" />
+              <View style={styles.expand} pointerEvents="none">
+                <Ionicons name="expand-outline" size={16} color="#fff" />
+                <Text style={styles.expandText}>タップで拡大</Text>
+              </View>
+            </>
+          ) : null}
+        </Pressable>
+
+        {/* 複数ページのページ送り (F-22) */}
+        {pageCount > 1 && (
+          <View style={styles.pager}>
+            <TouchableOpacity
+              style={styles.pagerBtn}
+              disabled={page <= 0}
+              onPress={() => setPage((p) => Math.max(0, p - 1))}
+              accessibilityLabel="前のページ"
+            >
+              <Ionicons name="chevron-back" size={18} color={page <= 0 ? colors.border : colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.pagerLabel}>{page + 1} / {pageCount}</Text>
+            <TouchableOpacity
+              style={styles.pagerBtn}
+              disabled={page >= pageCount - 1}
+              onPress={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              accessibilityLabel="次のページ"
+            >
+              <Ionicons name="chevron-forward" size={18} color={page >= pageCount - 1 ? colors.border : colors.text} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 家族での確認: 解析結果 / 家族の確認状況・再通知 / コメント一覧 */}
+        <FamilyPanel docId={id} status={family.status} comments={family.comments} myId={family.myId} />
+
+        <Text style={styles.section}>保存・共有</Text>
+        <View style={styles.card}>
+          {PDF_BUTTONS.map((b, i) => (
+            <TouchableOpacity
+              key={b.kind}
+              style={[styles.pdfRow, i > 0 && styles.pdfRowBorder]}
+              onPress={() => downloadAndShare(b)}
+              disabled={busy !== null}
+            >
+              <View style={styles.pdfIcon}>
+                <Ionicons name={b.icon} size={18} color={colors.primary} />
+              </View>
+              <Text style={styles.pdfLabel}>{b.label}</Text>
+              {busy === b.kind ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Ionicons name="share-outline" size={18} color={colors.textSubtle} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </ScrollView>
+
+      {/* コメントの入力と「あなたの対応」。対応を押すと一覧へ戻る */}
+      <ActionBar
+        docId={id}
+        current={family.mine?.action ?? null}
+        onCommentAdded={family.appendComment}
+        onDone={backToList}
+      />
+
+      <ImageViewer
+        visible={viewer}
+        uri={imageUri}
+        loading={loadingImage}
+        page={page}
+        pageCount={pageCount}
+        onPage={(p) => setPage(Math.max(0, Math.min(pageCount - 1, p)))}
+        onClose={() => setViewer(false)}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
@@ -216,6 +272,19 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   image: { width: "100%", height: 380, borderRadius: radius.sm },
+  expand: {
+    position: "absolute",
+    right: 12,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(15,23,42,0.6)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+  },
+  expandText: { color: "#fff", fontSize: 12, fontWeight: "600" },
   error: { color: colors.textMuted, fontSize: 13 },
   pager: {
     flexDirection: "row",

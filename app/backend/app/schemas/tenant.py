@@ -24,6 +24,12 @@ class TenantCreate(BaseModel):
     is_demo: bool = False
 
 
+class TenantSwitch(BaseModel):
+    """全体管理者が操作するテナント。"""
+
+    tenant_id: uuid.UUID
+
+
 class TenantUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = Field(default=None, max_length=255)

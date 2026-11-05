@@ -1,6 +1,13 @@
 import { Text, View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { daysUntil, formatMonthDay, type Importance } from "../api/client";
+import {
+  daysUntil,
+  formatMonthDay,
+  VISIBILITY_LABEL,
+  type CategoryVisibility,
+  type Importance,
+} from "../api/client";
+import { categoryColor, categoryIconName } from "../categoryStyle";
 import { colors, radius } from "../theme";
 
 // 「重要」バッジ（重要度 high のときだけ表示）
@@ -27,6 +34,32 @@ export function DeadlineChip({ deadline, prefix = "期限" }: { deadline: string
         {prefix} {formatMonthDay(deadline)}
         {suffix}
       </Text>
+    </View>
+  );
+}
+
+// カテゴリのチップ（カテゴリのアイコン・色つき。未分類は出さない）。「本人だけ」は鍵の印を付ける
+export function CategoryChip({
+  name,
+  visibility,
+  icon,
+  color,
+}: {
+  name: string | null;
+  visibility: CategoryVisibility;
+  icon?: string | null;
+  color?: string | null;
+}) {
+  if (!name) return null;
+  const c = categoryColor(color);
+  return (
+    <View
+      style={[styles.chip, { backgroundColor: c.bg }]}
+      accessibilityLabel={`カテゴリ ${name}（${VISIBILITY_LABEL[visibility]}）`}
+    >
+      <Ionicons name={categoryIconName(icon)} size={12} color={c.fg} />
+      <Text style={[styles.text, { color: c.fg }]} numberOfLines={1}>{name}</Text>
+      {visibility === "owner" && <Ionicons name="lock-closed" size={11} color={c.fg} />}
     </View>
   );
 }

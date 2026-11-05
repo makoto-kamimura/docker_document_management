@@ -6,9 +6,12 @@
 2. 実利用テナント / デモテナントの作成
 3. テナント導入前のデータを `SEED_LEGACY_TENANT_SLUG` のテナントへ割り当て
 4. 初期ユーザーの投入（認証情報は環境変数で上書き可能）
-   - 全体管理者: **非公開**。`SEED_SUPER_ADMIN_EMAIL` を指定したときだけ作成する
+   - 全体管理者: **非公開**。`SEED_SUPER_ADMIN_EMAIL` を指定したときだけ作成する。
+     操作中のテナントが未選択の全体管理者は、実利用テナントを操作中にする
    - 実利用テナント: 管理者1人
-   - デモテナント: 公開する 管理者 / 登録者 / 閲覧者 の3アカウント + デモ用グループ
+   - デモテナント: 公開する 管理者 / 登録者 / 閲覧者 / 子供 の4アカウント + デモ用グループ
+5. カテゴリ: 新しく作るテナントと、カテゴリ導入前からあるテナントにサンプル（投函チラシ・
+   重要書類・処方箋）を用意し、旧カテゴリの文字列を書類種別・タグへ移す
 
 uvicorn を複数ワーカーで起動すると各プロセスが `init_db` を呼ぶため、PostgreSQL の
 アドバイザリロックで直列化する。最初のプロセスが初期化を済ませ、後続は完了を待ってから
@@ -17,7 +20,7 @@ uvicorn を複数ワーカーで起動すると各プロセスが `init_db` を�
 
 import secrets
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -27,6 +30,7 @@ from app.db.session import Base, engine, SessionLocal
 from app.models.group import Group, GroupMember
 from app.models.tenant import Tenant
 from app.models.user import User, Role
+from app.services import categories
 
 
 def ensure_tenant(db: Session, slug: str, name: str, is_demo: bool) -> Tenant:
@@ -36,12 +40,14 @@ def ensure_tenant(db: Session, slug: str, name: str, is_demo: bool) -> Tenant:
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
+        categories.create_defaults(db, tenant.id)
         print(f"[init] tenant created: {slug} ({name})")
     return tenant
 
 
 def ensure_user(
-    db: Session, email: str, name: str, role: Role, password: str, tenant_id
+    db: Session, email: str, name: str, role: Role, password: str, tenant_id,
+    is_child: bool = False,
 ) -> User | None:
     """未登録なら作成して返す。password が空なら自動生成してログへ1度だけ出力する。"""
     if not email:
@@ -57,6 +63,7 @@ def ensure_user(
         name=name,
         role=role,
         tenant_id=tenant_id,
+        is_child=is_child,
         hashed_password=hash_password(password),
     )
     db.add(user)
@@ -70,18 +77,22 @@ def ensure_user(
 
 
 def seed_demo_accounts(db: Session, tenant_id) -> None:
-    """デモテナントの公開アカウント（管理者/登録者/閲覧者）とグループを用意する。
+    """デモテナントの公開アカウント（管理者/登録者/閲覧者/子供）とグループを用意する。
 
-    ロールごとの見え方を試せるよう3つ作り、同じグループへ入れる（グループ自動共有 F-36 で
-    管理者が登録した書類を登録者・閲覧者も見られる状態にする）。
+    ロールごとの見え方を試せるよう作り、同じグループへ入れる（グループ自動共有 F-36 で
+    管理者が登録した書類を登録者・閲覧者も見られる状態にする）。子供（登録者・子供の印つき）は
+    カテゴリの公開範囲（「重要書類」は子供以外）の違いを試すためのもの。
     """
     members = []
-    for email, name, role in (
-        (settings.seed_demo_admin_email, "デモ管理者", Role.admin),
-        (settings.seed_demo_registrar_email, "デモ登録者", Role.registrar),
-        (settings.seed_demo_viewer_email, "デモ閲覧者", Role.viewer),
+    for email, name, role, is_child in (
+        (settings.seed_demo_admin_email, "デモ管理者", Role.admin, False),
+        (settings.seed_demo_registrar_email, "デモ登録者", Role.registrar, False),
+        (settings.seed_demo_viewer_email, "デモ閲覧者", Role.viewer, False),
+        (settings.seed_demo_child_email, "デモ子供", Role.registrar, True),
     ):
-        user = ensure_user(db, email, name, role, settings.seed_demo_password, tenant_id)
+        user = ensure_user(
+            db, email, name, role, settings.seed_demo_password, tenant_id, is_child=is_child
+        )
         if user is not None:
             members.append(user)
     if not members or not settings.seed_demo_group_name:
@@ -128,9 +139,13 @@ def init_db() -> None:
 
 
 def _init_db() -> None:
+    # カテゴリ導入前の DB か（初回だけ、今あるテナントにサンプルのカテゴリを用意する）
+    had_categories = inspect(engine).has_table("categories")
     Base.metadata.create_all(bind=engine)
     migrate.add_tenant_columns()
     migrate.add_storage_columns()
+    migrate.add_category_columns()
+    migrate.add_category_style_columns()
 
     with SessionLocal() as db:
         primary = ensure_tenant(
@@ -142,12 +157,24 @@ def _init_db() -> None:
         # テナント導入前のデータの引き取り先（既定は実利用テナント）
         legacy = demo if settings.seed_legacy_tenant_slug == demo.slug else primary
         migrate.backfill(db, legacy.id)
+        if not had_categories:
+            for tenant in db.scalars(select(Tenant)).all():
+                categories.create_defaults(db, tenant.id)
+        migrate.move_free_text_categories(db)
 
         # 全体管理者（テナントに属さず、すべてのテナントを管理できる**非公開**アカウント）
         ensure_user(
             db, settings.seed_super_admin_email, "全体管理者", Role.super_admin,
             settings.seed_super_admin_password, None,
         )
+        # 全体管理者も1つのテナントの中で動く。未選択なら実利用テナントを操作中にする
+        # （切り替えは Web のテナント管理から）
+        db.execute(
+            update(User)
+            .where(User.role == Role.super_admin, User.active_tenant_id.is_(None))
+            .values(active_tenant_id=primary.id)
+        )
+        db.commit()
         # 実利用テナントの管理者
         ensure_user(
             db, settings.seed_admin_email, "管理者", Role.admin,

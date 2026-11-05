@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   BrowserRouter,
   Routes,
   Route,
+  Link,
   NavLink,
   Navigate,
   useNavigate,
@@ -17,16 +18,15 @@ import { UsersPage } from "./pages/UsersPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { StoragePage } from "./pages/StoragePage";
+import { CategoriesPage } from "./pages/CategoriesPage";
 import {
   isAuthenticated,
   clearToken,
   isAdminRole,
-  listTenants,
-  getActiveTenant,
-  setActiveTenant,
   ISSUE_URL,
   ROLE_LABEL,
-  type Tenant,
+  apiErrorMessage,
+  updateMe,
 } from "./api/client";
 import type { IconType } from "react-icons";
 import {
@@ -34,6 +34,7 @@ import {
   IoBusinessOutline,
   IoDocumentText,
   IoDocumentTextOutline,
+  IoFolderOutline,
   IoLogOutOutline,
   IoNotificationsOutline,
   IoPeopleOutline,
@@ -97,37 +98,60 @@ const NAV: NavItem[] = [
   { to: "/search", icon: IoSearchOutline, label: "全文検索" },
   { to: "/users", icon: IoPeopleOutline, label: "ユーザー管理", adminOnly: true },
   { to: "/groups", icon: IoPricetagsOutline, label: "グループ管理", adminOnly: true },
+  { to: "/categories", icon: IoFolderOutline, label: "カテゴリ管理", adminOnly: true },
   { to: "/storage", icon: IoServerOutline, label: "保存先", adminOnly: true },
   { to: "/tenants", icon: IoBusinessOutline, label: "テナント管理", superOnly: true },
 ];
 
-/** 全体管理者が操作対象のテナントを切り替えるセレクタ。切替後はデータを取り直すため再読込する。 */
-function TenantSwitcher() {
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const active = getActiveTenant() ?? "";
-  useEffect(() => {
-    listTenants().then(setTenants).catch(() => setTenants([]));
-  }, []);
+// 自分の表示名の変更（家族の確認状況・コメントに出る名前）
+function ProfileModal({ onClose }: { onClose: () => void }) {
+  const { me, setMe } = useMe();
+  const [name, setName] = useState(me?.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const next = name.trim();
+    if (!next) return setError("名前を入力してください。");
+    setSaving(true);
+    setError(null);
+    try {
+      setMe(await updateMe({ name: next }));
+      onClose();
+    } catch (err) {
+      setError(apiErrorMessage(err, "名前を変更できませんでした。"));
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
-    <div className="tenant-switcher">
-      <label htmlFor="tenant-switch">操作対象テナント</label>
-      <select
-        id="tenant-switch"
-        className="select"
-        value={active}
-        onChange={(e) => {
-          setActiveTenant(e.target.value || null);
-          window.location.reload();
-        }}
-      >
-        <option value="">すべてのテナント</option>
-        {tenants.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name}
-            {t.is_demo ? "（デモ）" : ""}
-          </option>
-        ))}
-      </select>
+    <div className="modal-overlay" onClick={onClose}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+        <h2>アカウント</h2>
+        <div className="field">
+          <label htmlFor="profile-name">表示名</label>
+          <input
+            id="profile-name"
+            className="input"
+            value={name}
+            maxLength={100}
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+          />
+          <p style={{ color: "var(--text-subtle)", fontSize: 12, margin: "6px 0 0" }}>
+            家族の確認状況やコメントに表示される名前です。
+          </p>
+        </div>
+        <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+          {me?.email}
+          {me?.tenant_name ? `（${me.tenant_name}）` : ""}
+        </p>
+        {error && <div className="login-error">{error}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>キャンセル</button>
+          <button className="btn btn-primary" disabled={saving}>{saving ? "保存中…" : "保存"}</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -136,6 +160,7 @@ function Sidebar() {
   const navigate = useNavigate();
   const { me } = useMe();
   const { unread } = useUnread();
+  const [profile, setProfile] = useState(false);
   function logout() {
     clearToken();
     navigate("/login", { replace: true });
@@ -172,7 +197,6 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        {me?.role === "super_admin" && <TenantSwitcher />}
         <a
           href={ISSUE_URL}
           target="_blank"
@@ -182,13 +206,19 @@ function Sidebar() {
           <span className="icon"><IoBugOutline /></span>
           バグ報告
         </a>
-        <div className="user-chip">
+        <button
+          className="user-chip"
+          onClick={() => setProfile(true)}
+          disabled={!me}
+          title="表示名を変更"
+        >
           <div className="avatar">{initial}</div>
           <div className="meta">
             <strong>{me ? `${me.name}（${ROLE_LABEL[me.role] ?? me.role}）` : "—"}</strong>
             <span>{me?.tenant_name ? `${me.tenant_name} / ${me.email}` : me?.email ?? ""}</span>
           </div>
-        </div>
+        </button>
+        {profile && <ProfileModal onClose={() => setProfile(false)} />}
         <button className="btn-logout" onClick={logout}>
           <IoLogOutOutline />
           ログアウト
@@ -207,6 +237,18 @@ function PageHeader({ title, description }: { title: string; description: string
   );
 }
 
+// 全体管理者は操作するテナントを選ぶまで、テナント管理以外の画面を使えない（API が 409 を返す）
+function TenantNotice() {
+  const { me } = useMe();
+  const location = useLocation();
+  if (me?.role !== "super_admin" || me.tenant_id || location.pathname === "/tenants") return null;
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+      操作するテナントが選ばれていません。<Link to="/tenants">テナント管理</Link>で「このテナントを操作」を選んでください。
+    </div>
+  );
+}
+
 function Shell({
   title,
   description,
@@ -221,7 +263,10 @@ function Shell({
       <Sidebar />
       <div className="main">
         <PageHeader title={title} description={description} />
-        <div className="content">{children}</div>
+        <div className="content">
+          <TenantNotice />
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -285,6 +330,18 @@ function App() {
               }
             />
             <Route
+              path="/categories"
+              element={
+                <RequireAuth>
+                  <RequireAdmin>
+                    <Shell title="カテゴリ管理" description="書類のカテゴリと、カテゴリごとに見られる人の範囲を決めます">
+                      <CategoriesPage />
+                    </Shell>
+                  </RequireAdmin>
+                </RequireAuth>
+              }
+            />
+            <Route
               path="/storage"
               element={
                 <RequireAuth>
@@ -311,7 +368,7 @@ function App() {
               element={
                 <RequireAuth>
                   <RequireSuperAdmin>
-                    <Shell title="テナント管理" description="利用者ごとのデータ分離の単位です。デモと実利用を分けて、テナントをまたいだ閲覧を防ぎます">
+                    <Shell title="テナント管理" description="利用者ごとのデータ分離の単位です。操作するテナントの切り替えとメンバーの移動もここで行います">
                       <TenantsPage />
                     </Shell>
                   </RequireSuperAdmin>

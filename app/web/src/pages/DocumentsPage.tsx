@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   apiErrorMessage,
   getDocument,
+  listCategories,
   listDocuments,
   listUsers,
   listPermissions,
@@ -12,12 +13,16 @@ import {
   listVersions,
   isAdminRole,
   IMPORTANCE_LABEL,
+  VISIBILITY_HELP,
+  VISIBILITY_LABEL,
+  type Category,
   type DocumentRead,
   type DocumentVersion,
   type Importance,
   type User,
   type PermissionLevel,
 } from "../api/client";
+import { ALL_ICON, CategoryIcon, categoryColor, categoryIcon } from "../categoryStyle";
 import {
   IoAlertCircleOutline,
   IoChevronForward,
@@ -55,9 +60,32 @@ const FILTERS: { key: Filter; label: string; match: (d: DocumentRead) => boolean
   { key: "read", label: "既読", match: (d) => d.is_read },
 ];
 
+// カテゴリ名のチップ（カテゴリのアイコン・色つき）。「本人だけ」は鍵の印を付ける
+function CategoryChip({ doc }: { doc: DocumentRead }) {
+  if (!doc.category) return null;
+  const Icon = categoryIcon(doc.category_icon);
+  const c = categoryColor(doc.category_color);
+  return (
+    <span
+      className="chip chip-cat"
+      style={{ background: c.bg, color: c.fg }}
+      title={`見られる人: ${VISIBILITY_LABEL[doc.category_visibility]}`}
+    >
+      <Icon />
+      {doc.category}
+      {doc.category_visibility === "owner" && <IoLockClosedOutline />}
+    </span>
+  );
+}
+
+// カテゴリの絞り込み（"all" = すべて、"none" = 未分類、それ以外はカテゴリID）
+type CategoryFilter = "all" | "none" | string;
+
 // ドキュメント一覧 (F-21)
 export function DocumentsPage() {
   const [docs, setDocs] = useState<DocumentRead[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { me } = useMe();
@@ -78,6 +106,7 @@ export function DocumentsPage() {
       .then(setDocs)
       .catch(() => setError("一覧の取得に失敗しました。バックエンドの接続状態をご確認ください。"))
       .finally(() => setLoading(false));
+    listCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
 
   // 権限設定・既読者の確認は（テナント）管理者または所有者のみ。サーバー側でも同じ判定をする
@@ -103,11 +132,40 @@ export function DocumentsPage() {
   }
 
   const current = FILTERS.find((f) => f.key === filter)!;
-  const shown = docs.filter(current.match);
+  const inCategory = (d: DocumentRead) =>
+    categoryFilter === "all" || (categoryFilter === "none" ? !d.category_id : d.category_id === categoryFilter);
+  const shown = docs.filter((d) => current.match(d) && inCategory(d));
   const countOf = (f: (typeof FILTERS)[number]) => (f.key === "all" || f.key === "read" ? 0 : docs.filter(f.match).length);
+  const categoryChips: { key: CategoryFilter; label: string; n: number; icon: string | null; color: string | null }[] = [
+    { key: "all", label: "すべて", n: 0, icon: null, color: null },
+    ...categories.map((c) => ({
+      key: c.id, label: c.name, n: docs.filter((d) => d.category_id === c.id).length, icon: c.icon, color: c.color,
+    })),
+    { key: "none", label: "未分類", n: docs.filter((d) => !d.category_id).length, icon: "folder", color: "slate" },
+  ];
 
   return (
     <section>
+      {/* カテゴリの絞り込み（モバイルと同じく状態の絞り込みより上） */}
+      {categories.length > 0 && (
+        <div className="filter-chips" style={{ marginBottom: 12 }}>
+          {categoryChips.map((c) => (
+            <button
+              key={c.key}
+              className={"filter-chip cat-filter" + (categoryFilter === c.key ? " active" : "")}
+              onClick={() => setCategoryFilter(c.key)}
+            >
+              {c.key === "all" ? (
+                <span className="cat-icon" style={{ width: 22, height: 22, fontSize: 13 }}><ALL_ICON /></span>
+              ) : (
+                <CategoryIcon icon={c.icon} color={c.color} size={22} />
+              )}
+              {c.label}
+              {c.n > 0 && <span className="filter-count">{c.n}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       {/* 未読/重要/期限 のフィルタ と リスト/サムネイル の切替（モバイルと同じ） */}
       <div className="listbar">
         <div className="filter-chips">
@@ -135,7 +193,6 @@ export function DocumentsPage() {
           {view === "list" ? <IoGridOutline /> : <IoListOutline />}
         </button>
       </div>
-
       {docs.length === 0 ? (
         <div className="card">
           <div className="state">
@@ -179,7 +236,7 @@ export function DocumentsPage() {
                   <div className="chips doc-row-chips">
                     <ImportanceBadge importance={d.importance} />
                     <DeadlineChip deadline={d.deadline} />
-                    {d.category && <span className="chip chip-cat">{d.category}</span>}
+                    <CategoryChip doc={d} />
                     {d.tags?.map((t) => (
                       <span key={t} className="chip">#{t}</span>
                     ))}
@@ -242,6 +299,7 @@ export function DocumentsPage() {
       {editDoc && (
         <EditDocModal
           doc={editDoc}
+          categories={categories}
           onClose={() => setEditDoc(null)}
           onSaved={() => {
             setEditDoc(null);
@@ -257,15 +315,19 @@ export function DocumentsPage() {
 // メタデータ/タグ/OCRテキスト編集 (F-16/F-17)
 function EditDocModal({
   doc,
+  categories,
   onClose,
   onSaved,
 }: {
   doc: DocumentRead;
+  categories: Category[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [title, setTitle] = useState(doc.title);
-  const [category, setCategory] = useState(doc.category ?? "");
+  // カテゴリで見られる人が決まる（"" = 未分類）
+  const [categoryId, setCategoryId] = useState(doc.category_id ?? "");
+  const picked = categories.find((c) => c.id === categoryId);
   const [docType, setDocType] = useState(doc.document_type ?? "");
   const [sensitivity, setSensitivity] = useState(doc.sensitivity);
   const [tagsText, setTagsText] = useState((doc.tags ?? []).join(", "));
@@ -296,7 +358,7 @@ function EditDocModal({
     try {
       await updateDocument(doc.id, {
         title: title.trim() || doc.title,
-        category: category.trim() || null,
+        category_id: categoryId || null,
         document_type: docType.trim() || null,
         sensitivity,
         tags: tagsText.split(",").map((t) => t.trim()).filter(Boolean),
@@ -334,7 +396,14 @@ function EditDocModal({
         <div className="field-row">
           <label className="field">
             <span>カテゴリ</span>
-            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} />
+            <select className="select" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value="">未分類</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}（{VISIBILITY_LABEL[c.visibility]}）
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             <span>書類種別</span>
@@ -349,6 +418,9 @@ function EditDocModal({
             </select>
           </label>
         </div>
+        <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
+          見られる人: {VISIBILITY_HELP[picked?.visibility ?? "family"]}
+        </p>
         <div className="field-row">
           <label className="field">
             <span>重要度</span>
@@ -499,6 +571,16 @@ function PermissionsModal({ doc, onClose }: { doc: DocumentRead; onClose: () => 
         <p style={{ color: "var(--text-subtle)", fontSize: 13 }}>
           所有者と管理者は常にフル権限です。ここでは他ユーザーのアクセスを設定します。
         </p>
+        {doc.category_visibility === "owner" && (
+          <p style={{ color: "var(--text-subtle)", fontSize: 13 }}>
+            カテゴリ「{doc.category}」（本人だけ）の書類は、ここで共有しても登録した本人以外は見られません。
+          </p>
+        )}
+        {doc.category_visibility === "adults" && (
+          <p style={{ color: "var(--text-subtle)", fontSize: 13 }}>
+            カテゴリ「{doc.category}」（子供以外）の書類は、子供の印が付いた人に共有しても見られません。
+          </p>
+        )}
 
         {error && <div className="login-error">{error}</div>}
         {loading ? (

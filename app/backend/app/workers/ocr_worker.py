@@ -18,7 +18,7 @@ from app.db.session import SessionLocal
 from app.models.document import Document, OcrStatus
 from app.models.document_tag import DocumentTag
 from app.models.family import DocumentInsight
-from app.services import family, image_processing, pdf_export, search, storage, summarize
+from app.services import family, image_processing, ocr_text, paddle_ocr, pdf_export, search, storage
 
 POLL_INTERVAL_SEC = 5
 REMINDER_INTERVAL_SEC = 600  # 家族へのリマインド判定の間隔
@@ -57,6 +57,28 @@ def _read_mode(doc: Document) -> str:
         return image_processing.MODE_COLOR
 
 
+def _paddle_pages(text: str, sources: list[bytes]) -> tuple[str, list[str]]:
+    """画像のページの本文を PaddleOCR で読む。読めなかったページは Tesseract の結果を使う。
+
+    ocrmypdf の sidecar（Tesseract）はページを \f で区切っているので、ページごとに選ぶ。
+    PDF に載るテキスト層（PDF 内の検索）は Tesseract のまま。戻り値は (全文, ページごとのエンジン)。
+    """
+    pages = text.split("\f")
+    if len(pages) == len(sources) + 1 and not pages[-1].strip():
+        pages = pages[:-1]
+    engines = ["tesseract"] * len(pages)
+    if settings.ocr_text_engine != "paddle" or len(pages) != len(sources):
+        return text, engines
+    alts = paddle_ocr.run(
+        sources, preset=settings.ocr_paddle_preset, max_side=settings.ocr_paddle_max_side
+    )
+    if alts is None:
+        return text, engines
+    for i, alt in enumerate(alts):
+        pages[i], engines[i] = paddle_ocr.choose_text(pages[i], alt)
+    return "\f".join(pages), engines
+
+
 def _process_document(doc: Document) -> tuple[str, bytes, bytes, dict]:
     """ドキュメントを処理し (ocr_text, document_pdf, preview_jpeg, quality) を返す。"""
     pages = _load_pages(doc)
@@ -87,17 +109,30 @@ def _process_document(doc: Document) -> tuple[str, bytes, bytes, dict]:
     # 画像ページ: スキャン処理 → 統合PDF
     mode = _read_mode(doc)
     processed: list[bytes] = []
+    sources: list[bytes] = []  # PaddleOCR 用（台形補正だけの画像。白黒の仕上げ前）
     first_quality: dict = {}
     for i, raw in enumerate(pages):
-        proc, q = image_processing.scan_page(raw, mode)
+        proc, q, src = image_processing.scan_page_with_ocr_source(raw, mode)
         processed.append(proc)
+        sources.append(src or raw)
         storage.put_object(doc, f"{doc.id}/proc/{i:03d}", proc, "image/jpeg")
         if i == 0:
             first_quality = q
 
-    pdf_bytes, text = pdf_export.build_searchable_pdf_from_images(processed, settings.ocr_lang)
+    if mode == image_processing.MODE_BW:
+        # 二値化した画像は OCR の誤りが大きく増えるので、グレーで OCR してから PDF の画像を白黒にする
+        ocr_inputs = [image_processing.gray_for_ocr(s) for s in sources]
+        pdf_bytes, text = pdf_export.build_searchable_pdf_from_images(ocr_inputs, settings.ocr_lang)
+        try:
+            pdf_bytes = pdf_export.binarize_pdf_images(pdf_bytes, image_processing.binarize)
+        except Exception as exc:  # noqa: BLE001 - 白黒にできなくても PDF（グレー）は使える
+            print(f"[ocr-worker] binarize pdf failed {doc.id}: {type(exc).__name__}: {exc}")
+    else:
+        pdf_bytes, text = pdf_export.build_searchable_pdf_from_images(processed, settings.ocr_lang)
+    text, engines = _paddle_pages(text, sources)
     preview = _to_jpeg(processed[0])
     first_quality["page_count"] = len(processed)
+    first_quality["ocr_engine"] = engines  # ページごとに使った OCR エンジン
     return text, pdf_bytes, preview, first_quality
 
 
@@ -115,7 +150,7 @@ def process_pending() -> None:
 
         try:
             text, pdf_bytes, preview, quality = _process_document(doc)
-            text = summarize.clean_ocr_text(text)  # OCRノイズ除去（検索/要約/表示の質を底上げ）
+            text = ocr_text.clean_ocr_text(text)  # OCRノイズ除去・カタカナ誤認識の補正
 
             doc.ocr_text = text
             doc.ocr_status = OcrStatus.done
@@ -128,13 +163,6 @@ def process_pending() -> None:
                 db.rollback()
                 print(f"[ocr-worker] analyze failed {doc.id}: {ana_exc}")
 
-            # 要約を生成（Dify or ルールベース）。検索対象・要約PDF再利用のため保存する。
-            summary = ""
-            try:
-                summary = summarize.summarize(text)
-            except Exception as sum_exc:  # noqa: BLE001
-                print(f"[ocr-worker] summarize failed {doc.id}: {sum_exc}")
-
             # タグを索引へ含める (F-17/F-24)
             tags = list(
                 db.scalars(
@@ -142,15 +170,13 @@ def process_pending() -> None:
                 ).all()
             )
 
-            # 検索索引へ登録（OCR本文 + 要約 + タグ + メタデータ, F-23〜F-26）
+            # 検索索引へ登録（OCR本文 + タグ + メタデータ, F-23〜F-26）
             search.index_document(
                 str(doc.id),
                 {
                     "title": doc.title,
                     "ocr_text": text,
-                    "summary": summary,
                     "tags": tags,
-                    "category": doc.category,
                     "document_type": doc.document_type,
                     "owner_id": str(doc.owner_id),
                     "tenant_id": str(doc.tenant_id) if doc.tenant_id else None,
@@ -163,11 +189,6 @@ def process_pending() -> None:
                 storage.put_object(
                     doc, document_pdf_key(doc), pdf_bytes, "application/pdf"
                 )
-                if summary:
-                    storage.put_object(
-                        doc, f"{doc.id}/summary.txt",
-                        summary.encode("utf-8"), "text/plain; charset=utf-8",
-                    )
                 if preview:
                     storage.put_object(
                         doc, f"{doc.id}/preview.jpg", preview, "image/jpeg"
@@ -247,6 +268,13 @@ def backfill_search_tenant(limit: int = 500) -> None:
         db.close()
 
 
+def backfill_search_reading(limit: int = 200) -> None:
+    """読み（ひらがな検索用）の入っていない索引ドキュメントに読みを入れる。"""
+    n = search.backfill_reading(limit)
+    if n:
+        print(f"[ocr-worker] backfilled search reading: {n}")
+
+
 def send_reminders() -> None:
     db = SessionLocal()
     try:
@@ -260,12 +288,12 @@ def send_reminders() -> None:
 def main() -> None:
     print("[ocr-worker] started")
     search.ensure_index()
-    last_reminder = 0.0
+    last_reminder = 0.0  # 起動直後に定期処理（読みの入れ直し等）を一度回す
     while True:
         process_pending()
         if time.time() - last_reminder >= REMINDER_INTERVAL_SEC:
             last_reminder = time.time()
-            for job in (backfill_insights, backfill_search_tenant, send_reminders):
+            for job in (backfill_insights, backfill_search_tenant, backfill_search_reading, send_reminders):
                 try:
                     job()
                 except Exception as exc:  # noqa: BLE001 - 定期処理の失敗で OCR を止めない
