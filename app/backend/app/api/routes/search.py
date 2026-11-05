@@ -28,7 +28,7 @@ def _as_uuid(value: str) -> uuid.UUID | None:
 
 @router.get("", response_model=list[SearchHit])
 def search_documents(
-    q: str = Query(..., description="検索キーワード（タイトル/OCR本文/要約/タグを横断）"),
+    q: str = Query(..., description="検索キーワード（タイトル/OCR本文/タグを横断）"),
     category_id: uuid.UUID | None = Query(None),
     document_type: str | None = Query(None),
     tag: str | None = Query(None, description="タグで絞り込み（完全一致）"),
@@ -36,7 +36,9 @@ def search_documents(
     user: User = Depends(get_current_user),
     tenant: uuid.UUID = Depends(tenant_scope),
 ):
-    """全文/絞り込み検索 (F-23〜F-26)。OCR本文に加え要約・タグも検索対象。
+    """全文/絞り込み検索 (F-23〜F-26)。OCR本文に加えタイトル・タグも検索対象。
+
+    OCR の1文字の読み違いや、ひらがなでの入力（読み）でも当たる。
 
     自分のテナント内で、かつ閲覧できるドキュメントだけを返す。閲覧できる範囲（カテゴリの公開範囲・
     共有・グループ）は一覧と同じ条件を DB で求め、その ID に絞って索引を検索する。返す直前にも

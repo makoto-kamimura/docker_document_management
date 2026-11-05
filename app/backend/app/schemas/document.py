@@ -90,4 +90,4 @@ class SearchHit(BaseModel):
     score: float
     category: str | None = None
     tags: list[str] = []
-    matched_in: str | None = None  # ヒット箇所: ocr_text / summary / title など
+    matched_in: str | None = None  # ヒット箇所: ocr_text / title

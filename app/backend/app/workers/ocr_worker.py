@@ -246,6 +246,13 @@ def backfill_search_tenant(limit: int = 500) -> None:
         db.close()
 
 
+def backfill_search_reading(limit: int = 200) -> None:
+    """読み（ひらがな検索用）の入っていない索引ドキュメントに読みを入れる。"""
+    n = search.backfill_reading(limit)
+    if n:
+        print(f"[ocr-worker] backfilled search reading: {n}")
+
+
 def send_reminders() -> None:
     db = SessionLocal()
     try:
@@ -259,12 +266,12 @@ def send_reminders() -> None:
 def main() -> None:
     print("[ocr-worker] started")
     search.ensure_index()
-    last_reminder = 0.0
+    last_reminder = 0.0  # 起動直後に定期処理（読みの入れ直し等）を一度回す
     while True:
         process_pending()
         if time.time() - last_reminder >= REMINDER_INTERVAL_SEC:
             last_reminder = time.time()
-            for job in (backfill_insights, backfill_search_tenant, send_reminders):
+            for job in (backfill_insights, backfill_search_tenant, backfill_search_reading, send_reminders):
                 try:
                     job()
                 except Exception as exc:  # noqa: BLE001 - 定期処理の失敗で OCR を止めない
