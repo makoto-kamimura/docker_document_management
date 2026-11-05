@@ -1,8 +1,8 @@
-"""要約PDF生成サービス。
+"""PDF生成サービス。
 
-OCRテキストの要約を、日本語対応のPDF（電子資料）として出力する。
-reportlab の内蔵CIDフォント (HeiseiKakuGo-W5) を使うため外部フォント不要で
-日本語を埋め込める。
+- 撮影画像・取込PDFから、OCR のテキスト層つきの検索可能PDF（電子資料）を作る（ocrmypdf）。
+- OCR で読み取った全文を、日本語対応のPDFとして出力する。reportlab の内蔵CIDフォント
+  (HeiseiKakuGo-W5) を使うため外部フォント不要で日本語を埋め込める。
 """
 
 import os
@@ -33,45 +33,6 @@ def _escape(text: str) -> str:
     """Paragraph 用に最小限のエスケープと改行変換を行う。"""
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return text.replace("\n", "<br/>")
-
-
-def build_summary_pdf(title: str, summary: str) -> bytes:
-    """タイトル見出し + 要約本文のPDFをバイト列で返す。"""
-    _ensure_font()
-
-    base = getSampleStyleSheet()["Normal"]
-    title_style = ParagraphStyle(
-        "DmsTitle", parent=base, fontName=_FONT, fontSize=16, leading=22, spaceAfter=6
-    )
-    meta_style = ParagraphStyle(
-        "DmsMeta", parent=base, fontName=_FONT, fontSize=9, leading=13, textColor="#64748b"
-    )
-    body_style = ParagraphStyle(
-        "DmsBody", parent=base, fontName=_FONT, fontSize=11, leading=18
-    )
-
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=A4,
-        leftMargin=20 * mm,
-        rightMargin=20 * mm,
-        topMargin=20 * mm,
-        bottomMargin=20 * mm,
-        title=title,
-    )
-
-    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
-    body = summary.strip() or "（要約を生成できませんでした）"
-
-    story = [
-        Paragraph(_escape(title or "（無題）"), title_style),
-        Paragraph(f"要約電子資料 / 生成日時: {generated}", meta_style),
-        Spacer(1, 8 * mm),
-        Paragraph(_escape(body), body_style),
-    ]
-    doc.build(story)
-    return buf.getvalue()
 
 
 # OCR 精度を上げる強化オプション（環境により未対応なら自動フォールバック）。
@@ -105,7 +66,7 @@ def _run_ocr(src: str, out: str, lang: str, sidecar: str, base: dict) -> None:
 def build_ocr_text_pdf(title: str, text: str) -> bytes:
     """OCRで認識した文字を集約した電子資料PDFを生成する (F-13/F-14系)。
 
-    要約ではなく**OCR抽出テキストの全文**を、日本語対応フォントで段落ごとに流し込み、
+    **OCR抽出テキストの全文**を、日本語対応フォントで段落ごとに流し込み、
     長文は自動的に複数ページへ分割する。
     """
     _ensure_font()
@@ -150,6 +111,36 @@ def build_ocr_text_pdf(title: str, text: str) -> bytes:
                 story.append(Paragraph(_escape(para), body_style))
     doc.build(story)
     return buf.getvalue()
+
+
+def binarize_pdf_images(pdf_bytes: bytes, binarize) -> bytes:
+    """検索可能 PDF の中の画像を白黒にする（テキスト層はそのまま）。
+
+    白黒モードは、文字を読み取りやすいグレーで OCR してから、PDF に載る画像だけをこれで
+    白黒にする。画像の大きさは変えないので、テキスト層の位置はずれない。
+    `binarize` は 8bit グレーの ndarray を受け取り、同じ大きさの 0/255 の ndarray を返す関数。
+    """
+    import zlib
+
+    import numpy as np
+    import pikepdf
+    from pikepdf import Name, PdfImage
+
+    with pikepdf.open(BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            for raw in page.images.values():
+                gray = np.asarray(PdfImage(raw).as_pil_image().convert("L"))
+                out = np.ascontiguousarray(binarize(gray), dtype=np.uint8)
+                raw.write(zlib.compress(out.tobytes()), filter=Name.FlateDecode)
+                raw.ColorSpace = Name.DeviceGray
+                raw.BitsPerComponent = 8
+                raw.Width, raw.Height = out.shape[1], out.shape[0]
+                for key in ("/DecodeParms", "/Decode", "/SMask"):
+                    if key in raw:
+                        del raw[key]
+        buf = BytesIO()
+        pdf.save(buf)
+        return buf.getvalue()
 
 
 def build_searchable_pdf(image_bytes: bytes, lang: str = "jpn+eng", dpi: int = 300) -> bytes:

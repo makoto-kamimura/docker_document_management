@@ -21,7 +21,7 @@ from app.models.user import User
 from app.schemas.document import DocumentDetail, DocumentRead, DocumentUpdate, VersionRead
 from app.schemas.acl import PermissionRead, PermissionUpsert
 from app.schemas.read import ReadReceiptRead
-from app.services import categories, family, storage, summarize, pdf_export, search
+from app.services import categories, family, storage, pdf_export, search
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -107,24 +107,13 @@ def _decorate(db: Session, docs: list, user: User) -> list:
 
 
 def _reindex(db: Session, doc: Document) -> None:
-    """ドキュメントを検索索引へ再登録する（メタ/OCR/タグ/要約を反映, F-23〜F-26）。
-
-    保存済みの要約 `{id}/summary.txt` があれば検索対象に含める。
-    """
-    summary = ""
-    try:
-        summary = storage.get_object(
-            doc, f"{doc.id}/summary.txt"
-        ).decode("utf-8", "ignore")
-    except Exception:
-        summary = ""
+    """ドキュメントを検索索引へ再登録する（メタ/OCR/タグを反映, F-23〜F-26）。"""
     try:
         search.index_document(
             str(doc.id),
             {
                 "title": doc.title,
                 "ocr_text": doc.ocr_text or "",
-                "summary": summary,
                 "tags": _tags_for(db, doc.id),
                 "document_type": doc.document_type,
                 "owner_id": str(doc.owner_id),
@@ -333,7 +322,7 @@ def export_ocr_text_pdf(
 ):
     """OCRで認識した文字を集約した電子資料PDF（全文）を生成して返す (F-13/F-14系)。
 
-    要約ではなくOCR抽出テキストの全文をPDF化する。OCR未完了なら 409。
+    OCR抽出テキストの全文をPDF化する。OCR未完了なら 409。
     """
     doc = db.get(Document, doc_id)
     if doc is None:
@@ -349,32 +338,6 @@ def export_ocr_text_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="ocr_text_{doc.id}.pdf"'},
-    )
-
-
-@router.get("/{doc_id}/pdf")
-def export_summary_pdf(
-    doc_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """OCRテキストを要約し、要約電子資料PDFを生成して返す (F-14系)。"""
-    doc = db.get(Document, doc_id)
-    if doc is None:
-        raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
-    ensure_can_access(db, doc, user, PermissionLevel.view)
-    if doc.ocr_status != OcrStatus.done or not doc.ocr_text:
-        raise HTTPException(status_code=409, detail="OCR未完了のため要約PDFを生成できません")
-
-    summary = summarize.summarize(doc.ocr_text)
-    pdf_bytes = pdf_export.build_summary_pdf(doc.title, summary)
-
-    db.add(AccessLog(document_id=doc.id, user_id=user.id, action=Action.download))
-    db.commit()
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="summary_{doc.id}.pdf"'},
     )
 
 
