@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   NavigationContainer,
   createNavigationContainerRef,
@@ -11,6 +12,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { isAuthenticated, setUnauthorizedHandler } from "./src/api/client";
 import { onPushOpened } from "./src/push";
+import { AccountButton } from "./src/components/AccountButton";
+import { MeProvider, useMe } from "./src/me";
 import { colors } from "./src/theme";
 import { UnreadProvider, useUnread } from "./src/unread";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -19,6 +22,7 @@ import { DocumentListScreen } from "./src/screens/DocumentListScreen";
 import { DocumentDetailScreen } from "./src/screens/DocumentDetailScreen";
 import { NotificationsScreen } from "./src/screens/NotificationsScreen";
 import { SearchScreen } from "./src/screens/SearchScreen";
+import { AccountScreen } from "./src/screens/AccountScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -36,11 +40,15 @@ const tabIcon = (name: IconName) => ({ color, size, focused }: { color: string; 
   <Ionicons name={focused ? name : (`${name}-outline` as IconName)} size={size} color={color} />
 );
 
-// ログイン後のメイン画面: 撮影 / 書類 / 検索 / お知らせ の下タブ
+// ログイン後のメイン画面: 撮影 / 書類 / 検索 / お知らせ の下タブ。ヘッダー右に自分の名前
 function MainTabs() {
   const { unread, refresh } = useUnread();
+  const { refresh: refreshMe } = useMe();
   // ログイン直後と、詳細から戻ったときに未読件数を取り直す
   useFocusEffect(refresh);
+  useEffect(() => {
+    refreshMe();
+  }, [refreshMe]);
 
   return (
     <Tab.Navigator
@@ -53,6 +61,8 @@ function MainTabs() {
         headerStyle: { backgroundColor: colors.bg },
         headerTitleStyle: { fontSize: 22, fontWeight: "700", color: colors.text },
         sceneStyle: { backgroundColor: colors.bg },
+        headerRight: () => <AccountButton />,
+        headerRightContainerStyle: { paddingRight: 12 },
       }}
     >
       <Tab.Screen
@@ -96,27 +106,44 @@ export default function App() {
   );
 
   return (
-    <SafeAreaProvider>
-      <UnreadProvider>
-        <NavigationContainer ref={navigationRef}>
-          <Stack.Navigator initialRouteName="Login">
-            <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen
-              name="Detail"
-              component={DocumentDetailScreen}
-              options={{
-                title: "",
-                headerShadowVisible: false,
-                headerBackButtonDisplayMode: "minimal",
-                headerTintColor: colors.primary,
-                headerStyle: { backgroundColor: colors.bg },
-                contentStyle: { backgroundColor: colors.bg },
-              }}
-            />
-          </Stack.Navigator>
-        </NavigationContainer>
-      </UnreadProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <MeProvider>
+          <UnreadProvider>
+            <NavigationContainer ref={navigationRef}>
+              <Stack.Navigator initialRouteName="Login">
+                <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+                <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="Detail"
+                  component={DocumentDetailScreen}
+                  options={{
+                    title: "",
+                    headerShadowVisible: false,
+                    headerBackButtonDisplayMode: "minimal",
+                    headerTintColor: colors.primary,
+                    headerStyle: { backgroundColor: colors.bg },
+                    contentStyle: { backgroundColor: colors.bg },
+                  }}
+                />
+                <Stack.Screen
+                  name="Account"
+                  component={AccountScreen}
+                  options={{
+                    title: "アカウント",
+                    headerShadowVisible: false,
+                    headerBackButtonDisplayMode: "minimal",
+                    headerTintColor: colors.primary,
+                    headerTitleStyle: { color: colors.text },
+                    headerStyle: { backgroundColor: colors.bg },
+                    contentStyle: { backgroundColor: colors.bg },
+                  }}
+                />
+              </Stack.Navigator>
+            </NavigationContainer>
+          </UnreadProvider>
+        </MeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

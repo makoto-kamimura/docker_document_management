@@ -1,19 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   ACTION_LABEL,
-  ACTIONS,
-  addComment,
   apiErrorMessage,
   formatDateTime as fmtDateTime,
   formatMonthDay,
-  getFamilyStatus,
-  getMe,
-  listComments,
   notifyFamily,
-  setMyAction,
-  type ActionStatus,
   type Comment,
   type FamilyMember,
   type FamilyStatus,
@@ -30,32 +23,20 @@ function memberState(m: FamilyMember): { text: string; tone: "ok" | "pending" | 
   return { text: "未読", tone: "pending" };
 }
 
-// 書類詳細の「家族」パネル: 重要度・期限 / 自分の対応 / 家族の確認状況と再通知 / コメント（Web と同じ構成）
-export function FamilyPanel({ docId, reloadKey }: { docId: string; reloadKey: number }) {
-  const [status, setStatus] = useState<FamilyStatus | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [myId, setMyId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+// 書類詳細の「家族」パネル: 重要度・期限 / 家族の確認状況と再通知 / コメント一覧。
+// 自分の対応とコメントの入力は、画面下に固定した ActionBar で行う。
+export function FamilyPanel({
+  docId,
+  status,
+  comments,
+  myId,
+}: {
+  docId: string;
+  status: FamilyStatus | null;
+  comments: Comment[];
+  myId: string | null;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    getFamilyStatus(docId).then(setStatus).catch(() => {});
-    listComments(docId).then(setComments).catch(() => {});
-  }, [docId]);
-
-  useEffect(() => { load(); }, [load, reloadKey]);
-  useEffect(() => { getMe().then((u) => setMyId(u.id)).catch(() => {}); }, []);
-
-  async function choose(action: ActionStatus) {
-    setBusy(action);
-    try {
-      setStatus(await setMyAction(docId, action));
-    } catch (e) {
-      Alert.alert("エラー", apiErrorMessage(e, "対応状況を保存できませんでした。"));
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function renotify(member?: FamilyMember) {
     setBusy(member ? member.user_id : "all");
@@ -74,27 +55,10 @@ export function FamilyPanel({ docId, reloadKey }: { docId: string; reloadKey: nu
     }
   }
 
-  async function send() {
-    const body = draft.trim();
-    if (!body) return;
-    setBusy("comment");
-    try {
-      const c = await addComment(docId, body);
-      setComments((prev) => [...prev, c]);
-      setDraft("");
-    } catch (e) {
-      Alert.alert("エラー", apiErrorMessage(e, "コメントを送れませんでした。"));
-    } finally {
-      setBusy(null);
-    }
-  }
-
   if (!status) return <ActivityIndicator style={{ marginVertical: 16 }} color={colors.primary} />;
   const ins = status.insight;
-  const mine = status.members.find((m) => m.user_id === myId);
   const pending = status.members.filter((m) => !m.confirmed && m.user_id !== myId);
   const confirmed = status.members.filter((m) => m.confirmed).length;
-  const canSend = busy === null && !!draft.trim();
 
   return (
     <View>
@@ -125,26 +89,6 @@ export function FamilyPanel({ docId, reloadKey }: { docId: string; reloadKey: nu
           )}
         </View>
       )}
-
-      {/* 自分の対応 */}
-      <Text style={styles.section}>あなたの対応</Text>
-      <View style={styles.segment}>
-        {ACTIONS.map((a) => {
-          const active = mine?.action === a;
-          return (
-            <TouchableOpacity
-              key={a}
-              style={[styles.segBtn, active && styles.segBtnActive]}
-              onPress={() => choose(a)}
-              disabled={busy !== null}
-            >
-              <Text style={[styles.segText, active && styles.segTextActive]} numberOfLines={1}>
-                {ACTION_LABEL[a]}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
 
       {/* 家族の確認状況 */}
       <View style={styles.cardHead}>
@@ -192,36 +136,22 @@ export function FamilyPanel({ docId, reloadKey }: { docId: string; reloadKey: nu
         )}
       </View>
 
-      {/* コメント */}
-      <Text style={styles.section}>コメント{comments.length > 0 ? `（${comments.length}）` : ""}</Text>
-      <View style={styles.card}>
-        {comments.map((c, i) => (
-          <View key={c.id} style={[styles.comment, i > 0 && styles.rowBorder]}>
-            <Text style={styles.commentHead}>
-              {c.user_name}  <Text style={styles.commentAt}>{fmtDateTime(c.created_at)}</Text>
-            </Text>
-            <Text style={styles.commentBody}>{c.body}</Text>
+      {/* コメント（入力は画面下のバー） */}
+      {comments.length > 0 && (
+        <>
+          <Text style={styles.section}>コメント（{comments.length}）</Text>
+          <View style={styles.card}>
+            {comments.map((c, i) => (
+              <View key={c.id} style={[styles.comment, i > 0 && styles.rowBorder]}>
+                <Text style={styles.commentHead}>
+                  {c.user_name}  <Text style={styles.commentAt}>{fmtDateTime(c.created_at)}</Text>
+                </Text>
+                <Text style={styles.commentBody}>{c.body}</Text>
+              </View>
+            ))}
           </View>
-        ))}
-        <View style={[styles.commentForm, comments.length > 0 && styles.rowBorder]}>
-          <TextInput
-            style={styles.commentInput}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="家族へのメモ（例: 出欠票は提出済み）"
-            placeholderTextColor={colors.textSubtle}
-            multiline
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, !canSend && { opacity: 0.4 }]}
-            onPress={send}
-            disabled={!canSend}
-            accessibilityLabel="送信"
-          >
-            <Ionicons name="paper-plane" size={16} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
+        </>
+      )}
     </View>
   );
 }
@@ -246,11 +176,6 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   doneChip: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 8 },
   doneChipText: { fontSize: 12, fontWeight: "700", color: colors.success },
-  segment: { flexDirection: "row", backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: 3, marginBottom: 20 },
-  segBtn: { flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: "center" },
-  segBtnActive: { backgroundColor: colors.surface },
-  segText: { color: colors.textMuted, fontWeight: "600", fontSize: 13 },
-  segTextActive: { color: colors.primary, fontWeight: "700" },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 10 },
   avatar: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primarySoft, alignItems: "center", justifyContent: "center" },
@@ -268,17 +193,4 @@ const styles = StyleSheet.create({
   commentHead: { fontSize: 12, fontWeight: "700", color: colors.text },
   commentAt: { fontWeight: "400", color: colors.textSubtle },
   commentBody: { fontSize: 14, color: colors.text, marginTop: 3, lineHeight: 20 },
-  commentForm: { flexDirection: "row", gap: 8, paddingVertical: 10, alignItems: "flex-end" },
-  commentInput: {
-    flex: 1,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingTop: 9,
-    paddingBottom: 9,
-    fontSize: 14,
-    minHeight: 38,
-    color: colors.text,
-  },
-  sendBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
 });

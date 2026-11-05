@@ -16,8 +16,16 @@ import {
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import type { CaptureMode, UploadPage } from "../api/client";
+import {
+  listCategories,
+  VISIBILITY_HELP,
+  type CaptureMode,
+  type Category,
+  type UploadPage,
+} from "../api/client";
 import { colors, radius } from "../theme";
+import { CategoryPicker } from "./CategoryPicker";
+import { DocumentGuide } from "./DocumentGuide";
 
 const MODES: { key: CaptureMode; label: string }[] = [
   { key: "color", label: "カラー" },
@@ -29,9 +37,10 @@ export type CaptureStep = "camera" | "review";
 
 const isPdf = (p: UploadPage) => p.type === "application/pdf";
 
-// 撮影 → 確認（タイトル・モード・ページ）→ 登録 の全画面モーダル (F-01/F-02/F-06/F-08/F-09)。
+// 撮影 → 確認（タイトル・カテゴリ・モード・ページ）→ 登録 の全画面モーダル (F-01/F-02/F-06/F-08/F-09)。
 // ストクルのスキャン画面と同じく、撮影タブのボタンから開いて「閉じる」で戻る。
 // モーダルを重ねないよう、撮影と確認は同じモーダルの中で切り替える。
+// カテゴリは撮影中にも選べ、確認画面に引き継ぐ。撮影中は書類を合わせる枠を重ねる。
 export function CaptureModal({
   visible,
   initialPages,
@@ -43,7 +52,7 @@ export function CaptureModal({
   initialPages: UploadPage[];
   initialStep: CaptureStep;
   // 登録できたら呼び出し側がモーダルを閉じる。失敗時は確認画面に残る
-  onSubmit: (title: string, pages: UploadPage[], mode: CaptureMode) => Promise<void>;
+  onSubmit: (title: string, pages: UploadPage[], mode: CaptureMode, categoryId: string | null) => Promise<void>;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -53,22 +62,31 @@ export function CaptureModal({
   const [pages, setPages] = useState<UploadPage[]>(initialPages);
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<CaptureMode>("color");
+  // カテゴリで見られる人が決まる（null = 未分類。家族の範囲）
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // 開くたびに初期状態へ戻す
+  // 開くたびに初期状態へ戻し、カテゴリを取り直す（Web のカテゴリ管理で変わるため）
   useEffect(() => {
     if (!visible) return;
     setStep(initialStep);
     setPages(initialPages);
     setTitle("");
     setMode("color");
+    setCategoryId(null);
+    listCategories().then(setCategories).catch(() => setCategories([]));
   }, [visible, initialStep, initialPages]);
+
+  const picked = categories.find((c) => c.id === categoryId);
 
   const pdf = pages.some(isPdf);
 
   async function capture() {
     if (!cameraRef.current) return;
-    const photo = await cameraRef.current.takePictureAsync();
+    // 最高画質で撮る（OCR の精度は解像度と圧縮の少なさで決まる）。ピントは既定の
+    // 連続オートフォーカス（autofocus="off" = 必要に応じて合わせ直す）のままにする
+    const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
     if (!photo) return;
     // 画質チェック: 低解像度を警告 (F-09)
     if (photo.width && Math.min(photo.width, photo.height) < 1000) {
@@ -107,7 +125,7 @@ export function CaptureModal({
     }
     setSubmitting(true);
     try {
-      await onSubmit(title, pages, mode);
+      await onSubmit(title, pages, mode, categoryId);
     } finally {
       setSubmitting(false);
     }
@@ -124,6 +142,12 @@ export function CaptureModal({
             </TouchableOpacity>
           </View>
 
+          {categories.length > 0 && (
+            <View style={styles.camCats}>
+              <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} variant="dark" />
+            </View>
+          )}
+
           <View style={styles.camBody}>
             {!permission ? (
               <ActivityIndicator color="#fff" />
@@ -136,7 +160,10 @@ export function CaptureModal({
                 </TouchableOpacity>
               </View>
             ) : (
-              <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />
+              <>
+                <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />
+                <DocumentGuide />
+              </>
             )}
           </View>
 
@@ -208,6 +235,14 @@ export function CaptureModal({
               maxLength={200}
             />
             <Text style={styles.help}>空欄なら、読み取った見出しから自動で付けます。</Text>
+
+            {categories.length > 0 && (
+              <>
+                <Text style={styles.label}>カテゴリ</Text>
+                <CategoryPicker categories={categories} value={categoryId} onChange={setCategoryId} />
+                <Text style={styles.help}>{VISIBILITY_HELP[picked?.visibility ?? "family"]}</Text>
+              </>
+            )}
 
             {!pdf && (
               <>
@@ -283,6 +318,7 @@ const styles = StyleSheet.create({
   },
   camTitle: { color: "#fff", fontSize: 16, fontWeight: "600" },
   camClose: { color: "#93c5fd", fontSize: 15 },
+  camCats: { paddingBottom: 10 },
   camBody: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   permission: { alignItems: "center", gap: 12, paddingHorizontal: 32 },
   permText: { color: "rgba(255,255,255,0.8)", fontSize: 14 },

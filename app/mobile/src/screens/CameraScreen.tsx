@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
-  Modal,
   Pressable,
   ScrollView,
   TouchableOpacity,
@@ -11,24 +10,19 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import {
   apiErrorMessage,
   formatDateTime,
-  getActiveTenant,
   getMe,
   isTransientError,
   listDocuments,
-  listTenants,
   OCR_LABEL,
-  setActiveTenant,
   uploadDocument,
   type CaptureMode,
   type DocumentRead,
-  type Tenant,
   type UploadPage,
 } from "../api/client";
 import { CaptureModal, type CaptureStep } from "../components/CaptureModal";
@@ -42,7 +36,6 @@ const RECENT_COUNT = 5;
 // 撮影・取込 (F-01/F-02/F-10/F-11) と、自分が最近登録した書類の一覧
 export function CameraScreen() {
   const navigation = useNavigation<any>();
-  const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(0);
   const [myId, setMyId] = useState<string | null>(null);
@@ -51,31 +44,26 @@ export function CameraScreen() {
   const [capture, setCapture] = useState<{ pages: UploadPage[]; step: CaptureStep } | null>(null);
   // 登録後に画面の上へ出すお知らせ
   const [notice, setNotice] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
-  // 全体管理者のときだけ選択肢を持つ（null = 一般ユーザー。自分のテナント固定）
-  const [tenants, setTenants] = useState<Tenant[] | null>(null);
-  const [tenant, setTenant] = useState<string | null>(getActiveTenant());
-  const [picking, setPicking] = useState(false);
+  // 全体管理者で、操作するテナントを Web のテナント管理で選んでいない
+  const [noTenant, setNoTenant] = useState(false);
 
   useEffect(() => {
     // 起動時に未送信キューを自動再送し、残件数を表示 (F-11)
     flushQueue().then(({ remaining }) => setPending(remaining)).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    getMe()
-      .then(async (u) => {
+  // テナントの切り替えは Web のテナント管理だけで行う。モバイルは選んだテナントの中で動くため、
+  // 画面に戻るたびに取り直して、Web で選んだ結果を反映する
+  const loadMe = useCallback(() => {
+    getMe(true)
+      .then((u) => {
         setMyId(u.id);
-        // 全体管理者はテナント未所属のため、登録先テナントを選ばせる（Web の TenantSwitcher と同じ）
-        if (u.role !== "super_admin") return;
-        const list = await listTenants();
-        setTenants(list);
-        if (!getActiveTenant() && list.length === 1) {
-          setActiveTenant(list[0].id);
-          setTenant(list[0].id);
-        }
+        setNoTenant(u.role === "super_admin" && !u.tenant_id);
       })
-      .catch(() => setRecent([]));
+      .catch(() => setRecent((prev) => prev ?? []));
   }, []);
+
+  useFocusEffect(loadMe);
 
   // 自分が登録した書類を新しい順に（一覧 API は created_at の降順）
   const loadRecent = useCallback(() => {
@@ -93,30 +81,26 @@ export function CameraScreen() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  function chooseTenant(id: string) {
-    setActiveTenant(id);
-    setTenant(id);
-    setPicking(false);
-    loadRecent();
-  }
-
-  // 全体管理者で登録先が未選択なら、選択シートを開いて true を返す
-  function needTenant() {
-    if (tenants && !tenant) {
-      setPicking(true);
-      return true;
+  // 全体管理者で操作するテナントが未選択なら、案内を出して true を返す（直前に Web で選んだ場合に備えて取り直す）
+  async function needTenant() {
+    if (!noTenant) return false;
+    const u = await getMe(true).catch(() => null);
+    if (u?.tenant_id) {
+      setNoTenant(false);
+      return false;
     }
-    return false;
+    Alert.alert("テナントが選ばれていません", NO_TENANT_TEXT);
+    return true;
   }
 
-  function openCamera() {
-    if (needTenant()) return;
+  async function openCamera() {
+    if (await needTenant()) return;
     setCapture({ pages: [], step: "camera" });
   }
 
   // ピッカーはモーダルの上では開かず、この画面から開いて確認画面に渡す
   async function pickFromLibrary() {
-    if (needTenant()) return;
+    if (await needTenant()) return;
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: true,
@@ -129,7 +113,7 @@ export function CameraScreen() {
   }
 
   async function pickPdf() {
-    if (needTenant()) return;
+    if (await needTenant()) return;
     const res = await DocumentPicker.getDocumentAsync({ type: "application/pdf", copyToCacheDirectory: true });
     if (res.canceled || !res.assets?.[0]) return;
     const f = res.assets[0];
@@ -137,12 +121,12 @@ export function CameraScreen() {
     setCapture({ pages: [{ uri: f.uri, name: f.name ?? "document.pdf", type: "application/pdf" }], step: "review" });
   }
 
-  async function submit(title: string, pages: UploadPage[], mode: CaptureMode) {
+  async function submit(title: string, pages: UploadPage[], mode: CaptureMode, categoryId: string | null) {
     const pdf = pages.some((p) => p.type === "application/pdf");
     // 空欄は自動命名にする。OCR の後に本文の見出しで置き換わる（backend analyze.py の AUTO_TITLE_RE）
     const finalTitle = title.trim() || `${pdf ? "取込" : "資料"}_${Date.now()}`;
     try {
-      await uploadDocument(finalTitle, pages, mode);
+      await uploadDocument(finalTitle, pages, mode, categoryId);
       setCapture(null);
       setNotice({ text: "登録しました。文字の読み取りが終わると家族にお知らせします。", tone: "ok" });
       loadRecent();
@@ -154,7 +138,7 @@ export function CameraScreen() {
       }
       // オフライン等 → 端末に退避して後で同期 (F-11)
       try {
-        await enqueueUpload(finalTitle, pages, mode);
+        await enqueueUpload(finalTitle, pages, mode, categoryId);
         setPending(await pendingCount());
         setCapture(null);
         setNotice({ text: "通信できないため端末に保存しました。接続後に自動送信します。", tone: "warn" });
@@ -179,8 +163,6 @@ export function CameraScreen() {
     }
   }
 
-  const tenantName = tenants?.find((t) => t.id === tenant)?.name;
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -203,15 +185,11 @@ export function CameraScreen() {
           </TouchableOpacity>
         )}
 
-        {tenants && (
-          <TouchableOpacity style={styles.tenant} onPress={() => setPicking(true)}>
-            <Ionicons name="business-outline" size={18} color={colors.textMuted} />
-            <Text style={styles.tenantLabel}>登録先</Text>
-            <Text style={[styles.tenantName, !tenantName && { color: colors.textSubtle }]} numberOfLines={1}>
-              {tenantName ?? "選択してください"}
-            </Text>
-            <Ionicons name="chevron-down" size={16} color={colors.textSubtle} />
-          </TouchableOpacity>
+        {noTenant && (
+          <View style={[styles.notice, styles.noticeWarn]}>
+            <Ionicons name="business-outline" size={18} color={colors.warning} />
+            <Text style={[styles.noticeText, { color: colors.warning }]}>{NO_TENANT_TEXT}</Text>
+          </View>
         )}
 
         {/* ボタンを押してからカメラを開く（ストクルと同じ） */}
@@ -284,35 +262,14 @@ export function CameraScreen() {
         onSubmit={submit}
         onClose={() => setCapture(null)}
       />
-
-      {/* 登録先テナントの選択シート（全体管理者のみ） */}
-      <Modal visible={picking} transparent animationType="fade" onRequestClose={() => setPicking(false)}>
-        <View style={styles.sheetRoot}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPicking(false)} />
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>登録先のテナント</Text>
-            <ScrollView style={{ maxHeight: 360 }}>
-              {tenants?.map((t) => (
-                <TouchableOpacity key={t.id} style={styles.sheetRow} onPress={() => chooseTenant(t.id)}>
-                  <Text style={styles.sheetRowText}>
-                    {t.name}
-                    {t.is_demo ? "（デモ）" : ""}
-                  </Text>
-                  {tenant === t.id && <Ionicons name="checkmark" size={20} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-              {tenants?.length === 0 && <Text style={styles.sheetEmpty}>テナントがありません。</Text>}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 // 閉じているときに毎回新しい配列を渡すと、モーダルの初期化が走り続けるため固定する
 const NO_PAGES: UploadPage[] = [];
+
+const NO_TENANT_TEXT = "操作するテナントが選ばれていません。Web のテナント管理で選んでください。";
 
 const styles = StyleSheet.create({
   scroll: { padding: 16, paddingBottom: 32 },
@@ -339,18 +296,6 @@ const styles = StyleSheet.create({
   },
   pendingText: { flex: 1, color: colors.warning, fontWeight: "700", fontSize: 14 },
   pendingAction: { color: colors.warning, fontWeight: "700", fontSize: 14 },
-  tenant: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginBottom: 12,
-  },
-  tenantLabel: { color: colors.textMuted, fontSize: 14 },
-  tenantName: { flex: 1, color: colors.text, fontSize: 15, fontWeight: "600", textAlign: "right" },
   hero: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -395,25 +340,4 @@ const styles = StyleSheet.create({
   rowMeta: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
   empty: { backgroundColor: colors.surface, borderRadius: radius.lg, alignItems: "center", gap: 10, padding: 24 },
   emptyText: { color: colors.textSubtle, fontSize: 13, textAlign: "center", lineHeight: 19 },
-
-  sheetRoot: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.35)" },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-  },
-  sheetHandle: { alignSelf: "center", width: 36, height: 5, borderRadius: 3, backgroundColor: colors.border, marginBottom: 12 },
-  sheetTitle: { fontSize: 17, fontWeight: "700", color: colors.text, marginBottom: 8 },
-  sheetRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 15,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  sheetRowText: { fontSize: 16, color: colors.text },
-  sheetEmpty: { color: colors.textMuted, paddingVertical: 16 },
 });
