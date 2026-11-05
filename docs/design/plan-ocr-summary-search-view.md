@@ -1,5 +1,7 @@
 # 計画: OCR/要約の精度向上 + 検索結果から画像確認
 
+> **要約機能は 2026-11 に廃止した**（要約PDF・Dify 連携・要約の索引）。経緯は [plan-capture-viewer-account.md](plan-capture-viewer-account.md)。
+
 > 実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context（目的）

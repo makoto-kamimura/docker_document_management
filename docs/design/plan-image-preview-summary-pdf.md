@@ -1,5 +1,7 @@
 # 計画: 撮影画像のプレビュー + 要約PDF出力
 
+> **要約機能は 2026-11 に廃止した**（要約PDF・Dify 連携・要約の索引）。経緯は [plan-capture-viewer-account.md](plan-capture-viewer-account.md)。
+
 > このファイルは実装の計画・進捗ログ。`docs/tasks/task.md` のチェック更新と併用する。
 
 ## Context（背景・目的）
