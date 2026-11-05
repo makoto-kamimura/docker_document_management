@@ -33,12 +33,19 @@ class Category(Base):
         Enum(CategoryVisibility), default=CategoryVisibility.family
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    # 一覧・撮影画面で見分けるためのアイコンと色。アイコンは Ionicons の名前（-outline を除いた形。
+    # 例: "medkit"）、色は CATEGORY_COLORS のどれか。未設定なら画面側で既定のアイコン・色を出す。
+    icon: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# 新しいテナントに用意するサンプル（名前, 公開範囲）
-DEFAULT_CATEGORIES: tuple[tuple[str, CategoryVisibility], ...] = (
-    ("投函チラシ", CategoryVisibility.everyone),
-    ("重要書類", CategoryVisibility.adults),
-    ("処方箋", CategoryVisibility.owner),
+# カテゴリの色（画面側で文字色・背景色に対応させる）
+CATEGORY_COLORS = ("slate", "indigo", "sky", "emerald", "amber", "orange", "rose", "violet")
+
+# 新しいテナントに用意するサンプル（名前, 公開範囲, アイコン, 色）
+DEFAULT_CATEGORIES: tuple[tuple[str, CategoryVisibility, str, str], ...] = (
+    ("投函チラシ", CategoryVisibility.everyone, "newspaper", "amber"),
+    ("重要書類", CategoryVisibility.adults, "shield-checkmark", "indigo"),
+    ("処方箋", CategoryVisibility.owner, "medkit", "rose"),
 )

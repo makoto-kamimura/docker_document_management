@@ -229,3 +229,35 @@ def test_new_tenant_gets_sample_categories_and_users_move_from_tenant_menu(clien
     assert res.status_code == 200 and res.json()["tenant_id"] == str(tid)
     users = client.get(f"/api/v1/tenants/{tid}/users", headers=_auth(w.super)).json()
     assert [u["name"] for u in users] == ["loner"]
+
+
+def test_category_icon_and_color(client, db, w):
+    body = {"name": "学校", "visibility": "family", "icon": "school", "color": "sky"}
+    res = client.post("/api/v1/categories", json=body, headers=_auth(w.admin))
+    assert res.status_code == 201
+    assert res.json()["icon"] == "school" and res.json()["color"] == "sky"
+    cid = res.json()["id"]
+    res = client.patch(f"/api/v1/categories/{cid}", json={"icon": "book", "color": "violet"}, headers=_auth(w.admin))
+    assert res.status_code == 200 and (res.json()["icon"], res.json()["color"]) == ("book", "violet")
+    # 名前だけ変えてもアイコン・色は残る
+    res = client.patch(f"/api/v1/categories/{cid}", json={"name": "学校のプリント"}, headers=_auth(w.admin))
+    assert (res.json()["icon"], res.json()["color"]) == ("book", "violet")
+    # 決まった形以外は受け付けない
+    for bad in ({"icon": "Book!"}, {"icon": "x" * 41}, {"color": "pink"}):
+        assert client.patch(f"/api/v1/categories/{cid}", json=bad, headers=_auth(w.admin)).status_code == 422
+    # 書類の一覧にもカテゴリのアイコン・色が付く
+    doc = w.docs["none"]
+    client.patch(f"/api/v1/documents/{doc.id}", json={"category_id": cid}, headers=_auth(w.owner))
+    got = client.get(f"/api/v1/documents/{doc.id}", headers=_auth(w.owner)).json()
+    assert (got["category_icon"], got["category_color"]) == ("book", "violet")
+
+
+def test_sample_categories_have_icons(client, db, w):
+    res = client.post("/api/v1/tenants", json={"slug": "d", "name": "D家"}, headers=_auth(w.super))
+    tid = uuid.UUID(res.json()["id"])
+    rows = db.execute(select(Category.name, Category.icon, Category.color).where(Category.tenant_id == tid)).all()
+    assert {r.name: (r.icon, r.color) for r in rows} == {
+        "投函チラシ": ("newspaper", "amber"),
+        "重要書類": ("shield-checkmark", "indigo"),
+        "処方箋": ("medkit", "rose"),
+    }

@@ -38,6 +38,8 @@ def _to_read(db: Session, user: User, cats: list[Category]) -> list[CategoryRead
             name=c.name,
             visibility=c.visibility,
             sort_order=c.sort_order,
+            icon=c.icon,
+            color=c.color,
             created_at=c.created_at,
             document_count=counts.get(c.id, 0),
         )
@@ -86,7 +88,10 @@ def create_category(
     if order is None:
         last = db.scalar(select(func.max(Category.sort_order)).where(Category.tenant_id == scope))
         order = 0 if last is None else last + 1
-    category = Category(tenant_id=scope, name=name, visibility=payload.visibility, sort_order=order)
+    category = Category(
+        tenant_id=scope, name=name, visibility=payload.visibility, sort_order=order,
+        icon=payload.icon, color=payload.color,
+    )
     db.add(category)
     db.commit()
     db.refresh(category)
@@ -101,7 +106,10 @@ def update_category(
     user: User = Depends(require_role(Role.admin)),
     scope: uuid.UUID = Depends(tenant_scope),
 ):
-    """名前・公開範囲・並び順を変える。公開範囲を変えると、中の書類を見られる人もすぐに変わる。"""
+    """名前・公開範囲・並び順・アイコン・色を変える。
+
+    公開範囲を変えると、中の書類を見られる人もすぐに変わる。
+    """
     category = _load(db, category_id, scope)
     if payload.name is not None and payload.name.strip() != category.name:
         _ensure_unique(db, scope, payload.name.strip())
@@ -110,6 +118,10 @@ def update_category(
         category.visibility = payload.visibility
     if payload.sort_order is not None:
         category.sort_order = payload.sort_order
+    if payload.icon is not None:
+        category.icon = payload.icon
+    if payload.color is not None:
+        category.color = payload.color
     db.commit()
     db.refresh(category)
     return _to_read(db, user, [category])[0]

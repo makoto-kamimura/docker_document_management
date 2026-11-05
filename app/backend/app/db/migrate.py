@@ -10,6 +10,7 @@
      `add_storage_columns()`     … 外部ストレージ連携の列（tenants / documents.storage_backend_id）
      `add_category_columns()`    … カテゴリと全体管理者の列（documents.category_id / users.is_child /
                                     users.active_tenant_id）
+     `add_category_style_columns()` … カテゴリのアイコン・色（categories.icon / color）
   3. シード/バックフィル         … テナント作成と `tenant_id` の充填、旧カテゴリ文字列の移し替え
                                     (`move_free_text_categories`)
   4. `finalize()`                … NOT NULL 制約とテナント内一意制約の付与
@@ -80,6 +81,25 @@ def add_category_columns() -> None:
         "REFERENCES categories(id)"
     )
     _exec("CREATE INDEX IF NOT EXISTS ix_documents_category_id ON documents (category_id)")
+
+
+def add_category_style_columns() -> None:
+    """カテゴリのアイコンと色の列を追加する。既定のカテゴリで未設定のものには既定値を入れる。"""
+    if not _is_postgres():
+        return
+    from app.models.category import DEFAULT_CATEGORIES
+
+    _exec("ALTER TABLE categories ADD COLUMN IF NOT EXISTS icon VARCHAR(40)")
+    _exec("ALTER TABLE categories ADD COLUMN IF NOT EXISTS color VARCHAR(20)")
+    with engine.begin() as conn:
+        for name, _visibility, icon, color in DEFAULT_CATEGORIES:
+            conn.execute(
+                text(
+                    "UPDATE categories SET icon = :icon, color = COALESCE(color, :color) "
+                    "WHERE name = :name AND icon IS NULL"
+                ),
+                {"icon": icon, "color": color, "name": name},
+            )
 
 
 def move_free_text_categories(db: Session) -> None:

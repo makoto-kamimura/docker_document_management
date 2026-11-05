@@ -36,5 +36,11 @@ class UserUpdate(BaseModel):
     is_child: bool | None = None
 
 
+class MeUpdate(BaseModel):
+    """自分の情報の変更（ログイン中の本人なら誰でも）。今は表示名だけ。"""
+
+    name: str = Field(min_length=1, max_length=100)
+
+
 class PasswordReset(BaseModel):
     password: str = Field(min_length=4, max_length=72)

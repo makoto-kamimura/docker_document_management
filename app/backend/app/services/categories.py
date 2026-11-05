@@ -14,10 +14,11 @@ from app.models.category import DEFAULT_CATEGORIES, Category
 def create_defaults(db: Session, tenant_id: uuid.UUID) -> None:
     """サンプルのカテゴリ（投函チラシ・重要書類・処方箋）を用意する。同名があれば作らない。"""
     existing = set(db.scalars(select(Category.name).where(Category.tenant_id == tenant_id)).all())
-    for order, (name, visibility) in enumerate(DEFAULT_CATEGORIES):
+    for order, (name, visibility, icon, color) in enumerate(DEFAULT_CATEGORIES):
         if name not in existing:
             db.add(Category(
-                tenant_id=tenant_id, name=name, visibility=visibility, sort_order=order
+                tenant_id=tenant_id, name=name, visibility=visibility, sort_order=order,
+                icon=icon, color=color,
             ))
     db.commit()
 

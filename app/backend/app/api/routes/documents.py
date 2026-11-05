@@ -82,6 +82,8 @@ def _decorate(db: Session, docs: list, user: User) -> list:
         cat = cats.get(d.category_id)
         d.category = cat.name if cat else None
         d.category_visibility = cat.visibility if cat else CategoryVisibility.family
+        d.category_icon = cat.icon if cat else None
+        d.category_color = cat.color if cat else None
         d.is_read = (d.id, user.id) in reads
         d.tags = tags.get(d.id, [])
         ins = insights.get(d.id)

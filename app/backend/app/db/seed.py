@@ -145,6 +145,7 @@ def _init_db() -> None:
     migrate.add_tenant_columns()
     migrate.add_storage_columns()
     migrate.add_category_columns()
+    migrate.add_category_style_columns()
 
     with SessionLocal() as db:
         primary = ensure_tenant(

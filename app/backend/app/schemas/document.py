@@ -26,6 +26,8 @@ class DocumentRead(BaseModel):
     category: str | None = None            # カテゴリ名（一覧/取得時に付与）
     # 見られる人の範囲。未分類は family（従来どおり）
     category_visibility: CategoryVisibility = CategoryVisibility.family
+    category_icon: str | None = None       # カテゴリのアイコン・色（一覧で見分ける用）
+    category_color: str | None = None
     document_type: str | None
     page_count: int
     file_format: str
