@@ -9,7 +9,6 @@ import {
   IoPrintOutline,
   IoReaderOutline,
   IoRemove,
-  IoSparklesOutline,
 } from "react-icons/io5";
 import { api, getDocument, logPrint, downloadPdf, type PdfKind } from "../api/client";
 
@@ -47,7 +46,7 @@ export function DocThumb({ id, className }: { id: string; className?: string }) 
   );
 }
 
-// PDF出力ボタン（モバイル詳細画面と同じ3種・同じ文言・同じアイコン）
+// PDF出力ボタン（モバイル詳細画面と同じ2種・同じ文言・同じアイコン）
 const PDF_BUTTONS: { kind: PdfKind; label: string; icon: IconType; notReadyMsg: string }[] = [
   {
     kind: "document",
@@ -59,12 +58,6 @@ const PDF_BUTTONS: { kind: PdfKind; label: string; icon: IconType; notReadyMsg: 
     kind: "ocr",
     label: "OCRテキストPDF",
     icon: IoReaderOutline,
-    notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
-  },
-  {
-    kind: "summary",
-    label: "要約PDF",
-    icon: IoSparklesOutline,
     notReadyMsg: "OCRがまだ完了していません。少し待って再度お試しください。",
   },
 ];

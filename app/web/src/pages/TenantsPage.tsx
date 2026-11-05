@@ -4,14 +4,20 @@ import {
   createTenant,
   updateTenant,
   deleteTenant,
-  getActiveTenant,
-  setActiveTenant,
+  switchTenant,
+  listTenantUsers,
+  moveUserToTenant,
   apiErrorMessage as errMsg,
+  ROLE_LABEL,
   type Tenant,
+  type User,
 } from "../api/client";
+import { useMe } from "../me";
 
-// テナント（データ分離の単位）のマスタ管理。全体管理者のみ表示される。
+// テナント（データ分離の単位）の管理。全体管理者のみ表示される。
+// テナントをまたぐ操作（作成・変更・削除、操作するテナントの切り替え、メンバーの移動）はこの画面にだけある。
 export function TenantsPage() {
+  const { me } = useMe();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,13 +25,18 @@ export function TenantsPage() {
   const [name, setName] = useState("");
   const [isDemo, setIsDemo] = useState(false);
   const [creating, setCreating] = useState(false);
-  const active = getActiveTenant();
+  const [membersOf, setMembersOf] = useState<Tenant | null>(null);
+  // 全体管理者の /auth/me は操作中のテナントを返す
+  const active = me?.tenant_id ?? null;
+
+  function reload() {
+    return listTenants()
+      .then(setTenants)
+      .catch(() => setError("テナント一覧の取得に失敗しました。"));
+  }
 
   useEffect(() => {
-    listTenants()
-      .then(setTenants)
-      .catch(() => setError("テナント一覧の取得に失敗しました。"))
-      .finally(() => setLoading(false));
+    reload().finally(() => setLoading(false));
   }, []);
 
   async function onCreate(e: React.FormEvent) {
@@ -64,18 +75,21 @@ export function TenantsPage() {
     try {
       await deleteTenant(t.id);
       setTenants((prev) => prev.filter((x) => x.id !== t.id));
-      if (active === t.id) {
-        setActiveTenant(null);
-        window.location.reload();
-      }
+      // 操作中のテナントを消したら未選択に戻る
+      if (active === t.id) window.location.reload();
     } catch (e: any) {
       alert(errMsg(e, "削除に失敗しました。"));
     }
   }
 
-  function onSwitch(t: Tenant | null) {
-    setActiveTenant(t ? t.id : null);
-    window.location.reload();
+  // 切り替えるとデータを取り直すため再読込する（Web・モバイルとも次の操作からこのテナントになる）
+  async function onSwitch(t: Tenant) {
+    try {
+      await switchTenant(t.id);
+      window.location.reload();
+    } catch (e: any) {
+      alert(errMsg(e, "切り替えに失敗しました。"));
+    }
   }
 
   if (loading) {
@@ -91,18 +105,15 @@ export function TenantsPage() {
     <section>
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <p style={{ margin: 0 }}>
-          テナントは<strong>データ分離の単位</strong>です。ユーザー・グループ・ドキュメント・通知は
+          テナントは<strong>データ分離の単位</strong>です。ユーザー・グループ・カテゴリ・ドキュメント・通知は
           いずれか1つのテナントに属し、一覧・検索・通知はすべてテナントで絞り込まれます。
-          テナントをまたいで見られるのは全体管理者だけです。
+          全体管理者も、ここで選んだ<strong>1つのテナントの中</strong>で、他のユーザーと同じように操作します
+          （モバイルアプリも同じテナントを使います）。
         </p>
         <p style={{ marginBottom: 0 }}>
-          現在の操作対象:{" "}
-          <strong>{active ? tenants.find((t) => t.id === active)?.name ?? "—" : "すべてのテナント"}</strong>
-          {active && (
-            <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => onSwitch(null)}>
-              解除
-            </button>
-          )}
+          操作中のテナント:{" "}
+          <strong>{active ? tenants.find((t) => t.id === active)?.name ?? "—" : "未選択"}</strong>
+          {!active && <span className="muted">（下の一覧の「このテナントを操作」で選んでください）</span>}
         </p>
       </div>
 
@@ -133,6 +144,9 @@ export function TenantsPage() {
           ＋ テナントを追加
         </button>
       </form>
+      <p className="muted" style={{ marginTop: -4 }}>
+        新しいテナントには、サンプルのカテゴリ「投函チラシ（全員）」「重要書類（子供以外）」「処方箋（本人だけ）」を用意します。
+      </p>
 
       <div className="card table-wrap">
         <table>
@@ -164,6 +178,9 @@ export function TenantsPage() {
                   <button className="btn btn-sm" onClick={() => onSwitch(t)} disabled={active === t.id}>
                     このテナントを操作
                   </button>
+                  <button className="btn btn-sm" onClick={() => setMembersOf(t)}>
+                    メンバー
+                  </button>
                   <button className="btn btn-sm" onClick={() => onRename(t)}>
                     名称変更
                   </button>
@@ -181,6 +198,113 @@ export function TenantsPage() {
           </tbody>
         </table>
       </div>
+
+      {membersOf && (
+        <MembersModal
+          tenant={membersOf}
+          tenants={tenants}
+          onMoved={reload}
+          onClose={() => setMembersOf(null)}
+        />
+      )}
     </section>
+  );
+}
+
+// テナントのメンバーの確認と、別のテナントへの移動
+function MembersModal({
+  tenant,
+  tenants,
+  onMoved,
+  onClose,
+}: {
+  tenant: Tenant;
+  tenants: Tenant[];
+  onMoved: () => void;
+  onClose: () => void;
+}) {
+  const [members, setMembers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const others = tenants.filter((t) => t.id !== tenant.id);
+
+  useEffect(() => {
+    listTenantUsers(tenant.id)
+      .then(setMembers)
+      .catch(() => setMembers([]))
+      .finally(() => setLoading(false));
+  }, [tenant.id]);
+
+  async function move(u: User, toId: string) {
+    const to = others.find((t) => t.id === toId);
+    if (!to) return;
+    if (
+      !window.confirm(
+        `「${u.name}」を テナント「${to.name}」へ移動しますか？\n` +
+          "本人が登録したドキュメントと通知も一緒に移ります。" +
+          "テナントをまたぐグループ所属・個別共有は解除されます。"
+      )
+    )
+      return;
+    setBusyId(u.id);
+    try {
+      await moveUserToTenant(to.id, u.id);
+      setMembers((prev) => prev.filter((x) => x.id !== u.id));
+      onMoved();
+    } catch (e: any) {
+      alert(errMsg(e, "テナントの変更に失敗しました。"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>メンバー</h2>
+        <p style={{ color: "var(--text-muted)", marginTop: -4 }}>{tenant.name}</p>
+
+        {loading ? (
+          <div className="state">
+            <div className="spinner" />
+          </div>
+        ) : (
+          <div className="acl-list">
+            {members.length === 0 && <p style={{ color: "var(--text-subtle)" }}>メンバーがいません。</p>}
+            {members.map((u) => (
+              <div className="acl-row" key={u.id}>
+                <div className="acl-user">
+                  <strong>
+                    {u.name}（{ROLE_LABEL[u.role]}
+                    {u.is_child ? "・子供" : ""}）
+                  </strong>
+                  <span>{u.email}</span>
+                </div>
+                <select
+                  className="select"
+                  value=""
+                  disabled={busyId === u.id || others.length === 0}
+                  onChange={(e) => move(u, e.target.value)}
+                  aria-label={`${u.name}の移動先`}
+                >
+                  <option value="">移動先…</option>
+                  {others.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className="btn btn-primary" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

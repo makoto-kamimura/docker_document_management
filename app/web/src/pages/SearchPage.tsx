@@ -5,7 +5,6 @@ import { DocThumb, ViewerModal } from "../components/DocViewer";
 
 const MATCH_LABEL: Record<string, string> = {
   ocr_text: "本文",
-  summary: "要約",
   title: "タイトル",
 };
 
@@ -54,7 +53,7 @@ export function SearchPage() {
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="本文・要約・タグから探す"
+            placeholder="本文・タイトル・タグから探す"
             aria-label="検索キーワード"
           />
         </label>
@@ -90,7 +89,7 @@ export function SearchPage() {
         <div className="state">
           <IoSearchOutline className="state-icon" />
           <h3>キーワードで検索</h3>
-          <p>タイトル・OCR本文・<strong>要約テキスト</strong>・タグを対象に、登録済みドキュメントを横断検索します（表記ゆれ・あいまい一致対応）。</p>
+          <p>タイトル・OCR本文・タグを対象に、登録済みドキュメントを横断検索します。表記ゆれ・OCRの読み違いにも対応し、ひらがな（読み）でも探せます。</p>
         </div>
       )}
 

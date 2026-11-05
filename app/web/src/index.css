@@ -157,23 +157,6 @@ a {
   border-top: 1px solid var(--border);
 }
 
-/* 全体管理者の操作対象テナント切替（サイドバー下部） */
-.tenant-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-}
-
-.tenant-switcher label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.tenant-switcher .select {
-  width: 100%;
-}
-
 .user-chip {
   display: flex;
   align-items: center;
@@ -1440,4 +1423,91 @@ tbody tr:hover {
 }
 .thumb-important .chip {
   margin-left: 0;
+}
+
+/* ---- カテゴリのアイコン・色 ---- */
+.cat-icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.filter-chip.cat-filter {
+  padding-left: 6px;
+}
+.style-picker {
+  display: grid;
+  gap: 10px;
+}
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 6px;
+}
+.icon-choice {
+  display: grid;
+  place-items: center;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+.icon-choice:hover {
+  background: var(--surface-3);
+}
+.icon-choice.active {
+  border-color: currentColor;
+  box-shadow: 0 0 0 2px currentColor inset;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.active {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.cat-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cat-icon-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
+}
+.cat-icon-btn:hover {
+  box-shadow: 0 0 0 3px var(--surface-3);
+}
+
+/* ---- サイドバーの自分の名前（押すと名前を変えられる） ---- */
+button.user-chip {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+button.user-chip:hover {
+  background: var(--surface-3);
 }
