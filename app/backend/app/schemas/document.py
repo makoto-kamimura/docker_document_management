@@ -50,6 +50,7 @@ class DocumentRead(BaseModel):
     my_action: str | None = None           # 自分の対応状況 seen / will_do / done / later
     family_total: int = 0                  # 家族の人数（所有者を含む）
     family_confirmed: int = 0              # そのうち確認済みの人数
+    can_delete: bool = False               # 自分がこの書類を削除できるか（削除ボタンの表示用）
 
 
 class DocumentDetail(DocumentRead):

@@ -225,3 +225,28 @@ def copy_document(
                 print(f"[storage] cleanup failed {key}: {exc}")
 
     return cleanup
+
+
+def document_remover(doc: Document) -> Callable[[], None]:
+    """書類のオブジェクト（`{id}/` 配下の全ページ・成果物・旧版）をすべて消す関数を返す。
+
+    呼び出し側は DB から書類を消して commit してから呼ぶ（commit に失敗してもファイルが残るように）。
+    commit 後は doc の属性を読めないため、保存先とキーの接頭辞はここで先に取り出しておく。
+    保存先に届かなくても例外にしない（DB に無い書類のファイルは読まれないので、記録だけ残す）。
+    """
+    location, backend_id, prefix = doc.storage_location, doc.storage_backend_id, f"{doc.id}/"
+
+    def remove() -> None:
+        try:
+            store = _store_for(location, backend_id)
+            keys = _call(backend_id, lambda: store.list(prefix))
+        except Exception as exc:  # noqa: BLE001 - 削除自体は成功させる
+            print(f"[storage] could not list {prefix} for removal: {exc}")
+            return
+        for key in keys:
+            try:
+                _call(backend_id, lambda k=key: store.delete(k))
+            except Exception as exc:  # noqa: BLE001 - 残りのキーは消し続ける
+                print(f"[storage] could not remove {key}: {exc}")
+
+    return remove

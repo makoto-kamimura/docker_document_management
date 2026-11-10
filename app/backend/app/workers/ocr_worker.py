@@ -136,6 +136,11 @@ def _process_document(doc: Document) -> tuple[str, bytes, bytes, dict]:
     return text, pdf_bytes, preview, first_quality
 
 
+def _exists(db, doc_id) -> bool:
+    """書類の行が残っているか（処理中に利用者が削除することがある）。"""
+    return db.scalar(select(Document.id).where(Document.id == doc_id)) is not None
+
+
 def process_pending() -> None:
     db = SessionLocal()
     try:
@@ -144,6 +149,7 @@ def process_pending() -> None:
         )
         if doc is None:
             return
+        doc_id = doc.id  # 処理中に削除されると doc の属性は読めなくなる
 
         doc.ocr_status = OcrStatus.processing
         db.commit()
@@ -201,8 +207,16 @@ def process_pending() -> None:
                       f"warnings={quality.get('warnings')}")
             except Exception as art_exc:  # noqa: BLE001
                 print(f"[ocr-worker] artifact save failed {doc.id}: {art_exc}")
+            if not _exists(db, doc_id):
+                # 処理中に削除された。削除 API がファイルを消した後に書いた成果物を残さない
+                storage.document_remover(doc)()
+                print(f"[ocr-worker] {doc_id} was deleted while processing")
+                return
         except Exception as exc:  # noqa: BLE001
             db.rollback()
+            if not _exists(db, doc_id):  # 処理中に削除された（状態を書き込む先が無い）
+                print(f"[ocr-worker] {doc_id} was deleted while processing")
+                return
             doc.ocr_status = OcrStatus.failed
             db.commit()
             print(f"[ocr-worker] failed {doc.id}: {exc}")
@@ -290,7 +304,10 @@ def main() -> None:
     search.ensure_index()
     last_reminder = 0.0  # 起動直後に定期処理（読みの入れ直し等）を一度回す
     while True:
-        process_pending()
+        try:
+            process_pending()
+        except Exception as exc:  # noqa: BLE001 - 1件の想定外の失敗で OCR 全体を止めない
+            print(f"[ocr-worker] process_pending failed: {type(exc).__name__}: {exc}")
         if time.time() - last_reminder >= REMINDER_INTERVAL_SEC:
             last_reminder = time.time()
             for job in (backfill_insights, backfill_search_tenant, backfill_search_reading, send_reminders):
