@@ -9,6 +9,7 @@ import {
   IoPrintOutline,
   IoReaderOutline,
   IoRemove,
+  IoTrashOutline,
 } from "react-icons/io5";
 import { api, getDocument, logPrint, downloadPdf, type PdfKind } from "../api/client";
 
@@ -67,9 +68,11 @@ const PDF_BUTTONS: { kind: PdfKind; label: string; icon: IconType; notReadyMsg: 
 export function ViewerModal({
   doc,
   onClose,
+  onDelete,
 }: {
   doc: { id: string; title: string; page_count?: number };
   onClose: () => void;
+  onDelete?: () => void; // 渡したときだけ「削除」を出す（削除できる人にだけ渡す）
 }) {
   const [page, setPage] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -121,6 +124,12 @@ export function ViewerModal({
               <IoPrintOutline />
               印刷
             </button>
+            {onDelete && (
+              <button className="btn btn-sm btn-danger" onClick={onDelete}>
+                <IoTrashOutline />
+                削除
+              </button>
+            )}
           </div>
         </div>
         <div className="viewer-stage">
