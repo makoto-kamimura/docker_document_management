@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -14,7 +14,7 @@ from app.models.category import CategoryVisibility
 from app.models.document import Document, Sensitivity, OcrStatus
 from app.models.document_permission import DocumentPermission, PermissionLevel
 from app.models.document_tag import DocumentTag
-from app.models.family import DocumentInsight
+from app.models.family import DocumentAction, DocumentComment, DocumentInsight, Notification
 from app.models.document_version import DocumentVersion
 from app.models.read_receipt import DocumentReadReceipt
 from app.models.user import User
@@ -78,6 +78,16 @@ def _decorate(db: Session, docs: list, user: User) -> list:
     members = family.family_ids_map(db, docs)
     reads, actions = family.status_maps(db, doc_ids)
     cats = categories.by_ids(db, [d.category_id for d in docs])
+    # 自分に個別に付与された権限。ここに来る書類は閲覧できると確認済み（公開範囲の上限は満たす）なので、
+    # 所有者・管理者・delete の付与 で can_access(..., delete) と同じ結果になる
+    grants = dict(
+        db.execute(
+            select(DocumentPermission.document_id, DocumentPermission.level).where(
+                DocumentPermission.user_id == user.id, DocumentPermission.document_id.in_(doc_ids)
+            )
+        ).all()
+    ) if doc_ids else {}
+    admin = is_admin(user)
     for d in docs:
         cat = cats.get(d.category_id)
         d.category = cat.name if cat else None
@@ -102,6 +112,11 @@ def _decorate(db: Session, docs: list, user: User) -> list:
                 actions[(d.id, u)].status if (d.id, u) in actions else None,
             )
             for u in ids
+        )
+        level = grants.get(d.id)
+        d.can_delete = (
+            d.owner_id == user.id or admin
+            or (level is not None and level.covers(PermissionLevel.delete))
         )
     return docs
 
@@ -407,6 +422,41 @@ def update_document(
         family.apply_analysis(db, doc, doc.ocr_text)
     _reindex(db, doc)
     return _decorate(db, [doc], user)[0]
+
+
+# 書類と一緒に消す行。タグ・版・閲覧ログには ON DELETE CASCADE が無いため、すべて明示的に消す
+_DOCUMENT_ROWS = (
+    DocumentTag, DocumentVersion, AccessLog, DocumentPermission, DocumentReadReceipt,
+    DocumentInsight, DocumentAction, DocumentComment, Notification,
+)
+
+
+@router.delete("/{doc_id}", status_code=204)
+def delete_document(
+    doc_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """書類を完全に削除する（F-37 の削除権限, D18）。元に戻せない。
+
+    所有者・管理者・削除可(delete)を付与された人だけ（公開範囲の上限も効く）。タグ・版・コメント・
+    通知・既読・家族の対応・閲覧ログの行も消して commit してから、保存先のファイル（全ページ・成果物・
+    旧版）と検索索引を消す。ファイルを消せなくても削除は成功させる（DB に無い書類のファイルは読まれない）。
+    """
+    doc = db.get(Document, doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="ドキュメントが見つかりません")
+    ensure_can_access(db, doc, user, PermissionLevel.delete)
+
+    remove_files = storage.document_remover(doc)
+    for model in _DOCUMENT_ROWS:
+        db.execute(delete(model).where(model.document_id == doc_id))
+    db.delete(doc)
+    db.commit()
+
+    remove_files()
+    search.delete_document(str(doc_id))
+    print(f"[documents] deleted {doc_id} by {user.id}")
 
 
 @router.get("/{doc_id}/pages/{index}/content")

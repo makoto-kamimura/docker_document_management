@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   apiErrorMessage,
+  deleteDocument,
   getDocument,
   listCategories,
   listDocuments,
@@ -33,6 +34,7 @@ import {
   IoLockClosedOutline,
   IoPeopleOutline,
   IoTimeOutline,
+  IoTrashOutline,
 } from "react-icons/io5";
 import { DocThumb, ViewerModal } from "../components/DocViewer";
 import { DeadlineChip, FamilyModal, ImportanceBadge } from "../components/FamilyPanel";
@@ -111,6 +113,23 @@ export function DocumentsPage() {
 
   // 権限設定・既読者の確認は（テナント）管理者または所有者のみ。サーバー側でも同じ判定をする
   const canManage = (d: DocumentRead) => isAdminRole(me?.role) || me?.id === d.owner_id;
+
+  // 書類の完全削除（元に戻せない）。ボタンは削除できる人（can_delete）にだけ出す
+  async function onDelete(d: DocumentRead) {
+    if (
+      !window.confirm(
+        `「${d.title}」を削除しますか？\nページ画像・PDF・コメント・家族の確認状況もすべて消え、元に戻せません。`
+      )
+    )
+      return;
+    try {
+      await deleteDocument(d.id);
+      setViewerDoc(null);
+      setDocs((ds) => ds.filter((x) => x.id !== d.id));
+    } catch (e: any) {
+      alert(apiErrorMessage(e, "削除に失敗しました。"));
+    }
+  }
 
   if (loading) {
     return (
@@ -224,7 +243,8 @@ export function DocumentsPage() {
       ) : (
         <div className="doc-rows">
           {shown.map((d) => (
-            // 行をクリックするとビューア。右のボタンは家族・対応と（管理者・所有者のみ）編集・履歴・権限
+            // 行をクリックするとビューア。右のボタンは家族・対応と（管理者・所有者のみ）編集・履歴・権限、
+            // （削除できる人のみ）削除
             <div key={d.id} className={"doc-row" + (d.is_read ? "" : " unread")} onClick={() => setViewerDoc(d)}>
               <div className="doc-row-thumb">
                 <DocThumb id={d.id} />
@@ -270,6 +290,11 @@ export function DocumentsPage() {
                     </button>
                   </>
                 )}
+                {d.can_delete && (
+                  <button className="icon-btn" onClick={() => onDelete(d)} title="削除" aria-label="削除">
+                    <IoTrashOutline />
+                  </button>
+                )}
               </div>
               <IoChevronForward className="doc-row-chevron" />
             </div>
@@ -290,6 +315,7 @@ export function DocumentsPage() {
       {viewerDoc && (
         <ViewerModal
           doc={viewerDoc}
+          onDelete={viewerDoc.can_delete ? () => onDelete(viewerDoc) : undefined}
           onClose={() => {
             setViewerDoc(null);
             reload(); // 閲覧で既読化されたバッジを反映（モバイルは画面フォーカス時に再取得）

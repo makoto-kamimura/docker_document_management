@@ -83,6 +83,7 @@ export interface DocumentRead {
   my_action: ActionStatus | null;
   family_total: number;
   family_confirmed: number;
+  can_delete: boolean; // 自分がこの書類を削除できるか
 }
 
 // 単体取得のみ OCR全文を含む
@@ -211,6 +212,11 @@ export async function updateDocument(
 ): Promise<DocumentRead> {
   const { data } = await api.patch<DocumentRead>(`/documents/${id}`, patch);
   return data;
+}
+
+// 書類を完全に削除する（元に戻せない）。所有者・管理者・削除可を付与された人だけ
+export async function deleteDocument(id: string): Promise<void> {
+  await api.delete(`/documents/${id}`);
 }
 
 // 閲覧ログ記録・既読化を伴う (F-28, F-32)。ビューアを開いたときに呼ぶ。
