@@ -176,6 +176,7 @@ export interface DocumentRead {
   my_action: ActionStatus | null;
   family_total: number;
   family_confirmed: number;
+  can_delete: boolean; // 自分がこの書類を削除できるか
 }
 
 export async function listDocuments(): Promise<DocumentRead[]> {
@@ -187,6 +188,11 @@ export async function listDocuments(): Promise<DocumentRead[]> {
 export async function getDocument(id: string): Promise<DocumentRead> {
   const { data } = await api.get<DocumentRead>(`/documents/${id}`);
   return data;
+}
+
+// 書類を完全に削除する（元に戻せない）。所有者・管理者・削除可を付与された人だけ
+export async function deleteDocument(id: string): Promise<void> {
+  await api.delete(`/documents/${id}`);
 }
 
 // ---- 家族での確認・対応・コメント・通知 (Web の api/client.ts と同じ) ----

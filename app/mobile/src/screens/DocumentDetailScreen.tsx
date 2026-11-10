@@ -16,6 +16,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useHeaderHeight } from "@react-navigation/elements";
 import * as Sharing from "expo-sharing";
 import {
+  apiErrorMessage,
+  deleteDocument,
   downloadAuthed,
   downloadPdf,
   getDocument,
@@ -66,7 +68,7 @@ export function DocumentDetailScreen({ route, navigation }: any) {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loadingImage, setLoadingImage] = useState(true);
   const [imageError, setImageError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<PdfKind | null>(null);
+  const [busy, setBusy] = useState<PdfKind | "delete" | null>(null);
   const [pageCount, setPageCount] = useState(1);
   const [page, setPage] = useState(0);
   const [viewer, setViewer] = useState(false);
@@ -134,6 +136,31 @@ export function DocumentDetailScreen({ route, navigation }: any) {
     } finally {
       setBusy(null);
     }
+  }
+
+  // 書類の完全削除（元に戻せない）。確認してから消し、開く前の一覧へ戻る（一覧はフォーカス時に読み直す）
+  function confirmDelete() {
+    Alert.alert(
+      "書類を削除",
+      `「${title}」を削除しますか？\nページ画像・PDF・コメント・家族の確認状況もすべて消え、元に戻せません。`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "削除",
+          style: "destructive",
+          onPress: async () => {
+            setBusy("delete");
+            try {
+              await deleteDocument(id);
+              backToList();
+            } catch (e) {
+              Alert.alert("エラー", apiErrorMessage(e, "削除できませんでした。"));
+              setBusy(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -233,6 +260,25 @@ export function DocumentDetailScreen({ route, navigation }: any) {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* 削除できる人（所有者・管理者・削除可を付与された人）にだけ出す */}
+        {doc?.can_delete && (
+          <View style={[styles.card, styles.deleteCard]}>
+            <TouchableOpacity
+              style={styles.pdfRow}
+              onPress={confirmDelete}
+              disabled={busy !== null}
+              accessibilityRole="button"
+              accessibilityLabel="この書類を削除"
+            >
+              <View style={[styles.pdfIcon, { backgroundColor: colors.dangerSoft }]}>
+                <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              </View>
+              <Text style={[styles.pdfLabel, { color: colors.danger }]}>この書類を削除</Text>
+              {busy === "delete" && <ActivityIndicator color={colors.danger} />}
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       {/* コメントの入力と「あなたの対応」。対応を押すと一覧へ戻る */}
@@ -298,6 +344,7 @@ const styles = StyleSheet.create({
   pagerBtn: { paddingHorizontal: 12, paddingVertical: 8 },
   pagerLabel: { color: colors.text, fontWeight: "600", fontSize: 14, minWidth: 56, textAlign: "center" },
   card: { backgroundColor: colors.surface, borderRadius: radius.lg, paddingHorizontal: 14 },
+  deleteCard: { marginTop: 20 },
   pdfRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 },
   pdfRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   pdfIcon: {
