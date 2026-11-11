@@ -4,8 +4,11 @@
 ユーザーだけを動かすと書類が別テナントに取り残されるため、次をまとめて移す:
 
 - そのユーザーが所有するドキュメント（検索索引の tenant_id も更新）
-- そのユーザー宛の通知
+- そのユーザー宛の通知のうち、本人の書類についてのものと書類に紐づかないもの
 - 移動で不整合になるもの（他テナントとのグループ所属・ACL）は解除する
+
+他人の書類についての通知は移さずに消す。移すと、元のテナントに残る書類のタイトルや
+「○○さんが登録」が移動先のテナント（公開デモのこともある）から見えてしまうため。
 """
 
 from __future__ import annotations
@@ -28,7 +31,17 @@ def move_user(db: Session, user: User, tenant_id: uuid.UUID) -> int:
     if user.tenant_id == tenant_id:
         return 0
 
-    doc_ids = list(db.scalars(select(Document.id).where(Document.owner_id == user.id)).all())
+    own_docs = select(Document.id).where(Document.owner_id == user.id)
+    doc_ids = list(db.scalars(own_docs).all())
+
+    # 他人の書類（元のテナントに残る）についての通知は持ち出さずに消す
+    db.execute(
+        delete(Notification).where(
+            Notification.user_id == user.id,
+            Notification.document_id.is_not(None),
+            Notification.document_id.not_in(own_docs),
+        )
+    )
 
     # 移動先テナント以外のグループ所属を解除（グループはテナント内に閉じるため）
     other_groups = select(Group.id).where(Group.tenant_id != tenant_id)

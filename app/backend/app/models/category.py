@@ -48,4 +48,5 @@ DEFAULT_CATEGORIES: tuple[tuple[str, CategoryVisibility, str, str], ...] = (
     ("投函チラシ", CategoryVisibility.everyone, "newspaper", "amber"),
     ("重要書類", CategoryVisibility.adults, "shield-checkmark", "indigo"),
     ("処方箋", CategoryVisibility.owner, "medkit", "rose"),
+    ("取扱説明書", CategoryVisibility.everyone, "book", "emerald"),
 )

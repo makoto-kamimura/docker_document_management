@@ -145,7 +145,7 @@ export function TenantsPage() {
         </button>
       </form>
       <p className="muted" style={{ marginTop: -4 }}>
-        新しいテナントには、サンプルのカテゴリ「投函チラシ（全員）」「重要書類（子供以外）」「処方箋（本人だけ）」を用意します。
+        新しいテナントには、サンプルのカテゴリ「投函チラシ（全員）」「重要書類（子供以外）」「処方箋（本人だけ）」「取扱説明書（全員）」を用意します。
       </p>
 
       <div className="card table-wrap">

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
   listCategories,
+  UPLOAD_JPEG_QUALITY,
   VISIBILITY_HELP,
   type CaptureMode,
   type Category,
@@ -66,6 +67,16 @@ export function CaptureModal({
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // onCameraReady が来るまでシャッターを押せない（CameraView は撮影画面を出すたびに作り直される）
+  const [ready, setReady] = useState(false);
+  // 撮影中。iOS は前の撮影を処理している間に撮ると "Camera is not ready yet" で失敗するため、1枚ずつ撮る
+  const [shooting, setShooting] = useState(false);
+  const shootingRef = useRef(false);
+
+  // カメラが画面から消えたら、次に出たとき onCameraReady を待ち直す
+  useEffect(() => {
+    if (!visible || step !== "camera") setReady(false);
+  }, [visible, step]);
 
   // 開くたびに初期状態へ戻し、カテゴリを取り直す（Web のカテゴリ管理で変わるため）
   useEffect(() => {
@@ -83,16 +94,29 @@ export function CaptureModal({
   const pdf = pages.some(isPdf);
 
   async function capture() {
-    if (!cameraRef.current) return;
-    // 最高画質で撮る（OCR の精度は解像度と圧縮の少なさで決まる）。ピントは既定の
-    // 連続オートフォーカス（autofocus="off" = 必要に応じて合わせ直す）のままにする
-    const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
-    if (!photo) return;
-    // 画質チェック: 低解像度を警告 (F-09)
-    if (photo.width && Math.min(photo.width, photo.height) < 1000) {
-      Alert.alert("低解像度の可能性", "解像度が低い可能性があります。明るい場所で近づいて再撮影すると精度が上がります。");
+    // 連打は state の反映前に届くため ref で弾く
+    if (!cameraRef.current || !ready || shootingRef.current) return;
+    shootingRef.current = true;
+    setShooting(true);
+    try {
+      // 解像度はそのまま（4032px ≒ A4 で約 340dpi）、JPEG の画質は 0.9 にする。1.0 だと1枚 9MB 前後になり、
+      // 6〜7枚で 1回の登録の上限（プロキシの 50MB）を超えて 413 になる。0.9 で約3分の1になり、OCR への影響は
+      // ない（PaddleOCR は長辺 1600px に縮めて読む）。ピントは既定の連続オートフォーカス
+      // （autofocus="off" = 必要に応じて合わせ直す）のままにする
+      const photo = await cameraRef.current.takePictureAsync({ quality: UPLOAD_JPEG_QUALITY });
+      if (!photo) return;
+      // 画質チェック: 低解像度を警告 (F-09)
+      if (photo.width && Math.min(photo.width, photo.height) < 1000) {
+        Alert.alert("低解像度の可能性", "解像度が低い可能性があります。明るい場所で近づいて再撮影すると精度が上がります。");
+      }
+      setPages((prev) => [...prev, { uri: photo.uri, type: "image/jpeg" }]);
+    } catch {
+      // 撮影中に閉じた（カメラが外れた）ときは黙って捨てる
+      if (cameraRef.current) Alert.alert("撮影できませんでした", "もう一度シャッターを押してください。");
+    } finally {
+      shootingRef.current = false;
+      setShooting(false);
     }
-    setPages((prev) => [...prev, { uri: photo.uri, type: "image/jpeg" }]);
   }
 
   function movePage(index: number, dir: -1 | 1) {
@@ -161,7 +185,7 @@ export function CaptureModal({
               </View>
             ) : (
               <>
-                <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} />
+                <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} onCameraReady={() => setReady(true)} />
                 <DocumentGuide />
               </>
             )}
@@ -183,12 +207,12 @@ export function CaptureModal({
             <View style={styles.controls}>
               <View style={styles.controlSide} />
               <TouchableOpacity
-                style={styles.shutter}
+                style={[styles.shutter, (!ready || shooting) && { opacity: 0.5 }]}
                 onPress={capture}
-                disabled={!permission?.granted}
+                disabled={!permission?.granted || !ready || shooting}
                 accessibilityLabel="シャッター"
               >
-                <View style={styles.shutterInner} />
+                <View style={styles.shutterInner}>{shooting && <ActivityIndicator color={colors.text} />}</View>
               </TouchableOpacity>
               <View style={styles.controlSide}>
                 <TouchableOpacity
@@ -338,7 +362,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#fff" },
+  shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
   next: {
     flexDirection: "row",
     alignItems: "center",

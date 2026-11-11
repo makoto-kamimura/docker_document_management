@@ -52,7 +52,14 @@ api.interceptors.response.use(
 );
 
 // API エラー(FastAPI の detail)を表示用メッセージにする
+// 撮影・写真の取り込みの JPEG 画質（CaptureModal の capture() に理由）
+export const UPLOAD_JPEG_QUALITY = 0.9;
+
 export function apiErrorMessage(e: any, fallback: string): string {
+  // 413 はバックエンドに届く前にプロキシ（nginx の client_max_body_size 50m）が返し、detail が無い
+  if (e?.response?.status === 413) {
+    return "ファイルが大きすぎます（1回の登録は合計50MBまで）。ページを減らすか、何回かに分けて登録してください。";
+  }
   return e?.response?.data?.detail ?? fallback;
 }
 
