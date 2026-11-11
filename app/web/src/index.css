@@ -1176,6 +1176,38 @@ tbody tr:hover {
   object-fit: cover;
   display: block;
 }
+/* 入力中の候補はサムネイルの代わりにカテゴリのアイコン（画像を取りに行かない） */
+.result-thumb-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 検索結果の上の一行（件数と「本文からも探す」） */
+.search-note {
+  margin: -8px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.search-note-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.search-full-btn {
+  margin-left: 0;
+  background: var(--primary-soft);
+  color: var(--primary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-full-btn:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
 .result-body {
   flex: 1;
   min-width: 0;
