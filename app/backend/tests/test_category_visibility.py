@@ -225,7 +225,7 @@ def test_new_tenant_gets_sample_categories_and_users_move_from_tenant_menu(clien
     assert res.status_code == 201
     tid = uuid.UUID(res.json()["id"])
     names = db.scalars(select(Category.name).where(Category.tenant_id == tid)).all()
-    assert set(names) == {"投函チラシ", "重要書類", "処方箋"}
+    assert set(names) == {"投函チラシ", "重要書類", "処方箋", "取扱説明書"}
     res = client.put(f"/api/v1/tenants/{tid}/users/{w.loner.id}", headers=_auth(w.super))
     assert res.status_code == 200 and res.json()["tenant_id"] == str(tid)
     users = client.get(f"/api/v1/tenants/{tid}/users", headers=_auth(w.super)).json()
@@ -284,4 +284,5 @@ def test_sample_categories_have_icons(client, db, w):
         "投函チラシ": ("newspaper", "amber"),
         "重要書類": ("shield-checkmark", "indigo"),
         "処方箋": ("medkit", "rose"),
+        "取扱説明書": ("book", "emerald"),
     }

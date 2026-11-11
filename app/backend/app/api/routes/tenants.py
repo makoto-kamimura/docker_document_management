@@ -84,7 +84,7 @@ def list_tenants(db: Session = Depends(get_db)):
 
 @router.post("", response_model=TenantRead, status_code=201)
 def create_tenant(payload: TenantCreate, db: Session = Depends(get_db)):
-    """テナントを作り、サンプルのカテゴリ（投函チラシ・重要書類・処方箋）を用意する。"""
+    """テナントを作り、サンプルのカテゴリ（投函チラシ・重要書類・処方箋・取扱説明書）を用意する。"""
     if db.scalar(select(Tenant).where(Tenant.slug == payload.slug)):
         raise HTTPException(status_code=409, detail="この識別子のテナントは既に存在します")
     tenant = Tenant(**payload.model_dump())
