@@ -15,6 +15,7 @@ from app.main import app
 from app.models.category import Category, CategoryVisibility
 from app.models.document import Document
 from app.models.document_permission import DocumentPermission, PermissionLevel
+from app.models.family import Notification, NotificationKind
 from app.models.group import Group, GroupMember
 from app.models.tenant import Tenant
 from app.models.user import Role, User
@@ -229,6 +230,29 @@ def test_new_tenant_gets_sample_categories_and_users_move_from_tenant_menu(clien
     assert res.status_code == 200 and res.json()["tenant_id"] == str(tid)
     users = client.get(f"/api/v1/tenants/{tid}/users", headers=_auth(w.super)).json()
     assert [u["name"] for u in users] == ["loner"]
+
+
+def test_moving_a_user_leaves_notifications_about_others_documents_behind(client, db, w):
+    mine = Document(tenant_id=w.a.id, title="自分の紙", owner_id=w.adult.id)
+    db.add(mine)
+    db.commit()
+
+    def notify(doc, title):
+        db.add(Notification(user_id=w.adult.id, tenant_id=w.a.id, document_id=doc.id if doc else None,
+                            kind=NotificationKind.new_document, title=title, body=""))
+
+    notify(w.docs[CategoryVisibility.family], "家に残る紙")
+    notify(mine, "自分の紙")
+    notify(None, "書類なし")
+    db.commit()
+
+    res = client.put(f"/api/v1/tenants/{w.b.id}/users/{w.adult.id}", headers=_auth(w.super))
+    assert res.status_code == 200
+    rows = db.execute(
+        select(Notification.title, Notification.tenant_id).where(Notification.user_id == w.adult.id)
+    ).all()
+    # 元のテナントの書類のタイトルは移動先へ持ち出さない。本人の書類と書類なしの通知は一緒に移る
+    assert {r.title: r.tenant_id for r in rows} == {"自分の紙": w.b.id, "書類なし": w.b.id}
 
 
 def test_category_icon_and_color(client, db, w):
