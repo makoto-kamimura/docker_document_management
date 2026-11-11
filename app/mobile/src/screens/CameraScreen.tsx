@@ -21,6 +21,7 @@ import {
   listDocuments,
   OCR_LABEL,
   uploadDocument,
+  UPLOAD_JPEG_QUALITY,
   type CaptureMode,
   type DocumentRead,
   type UploadPage,
@@ -104,7 +105,8 @@ export function CameraScreen() {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: true,
-      quality: 1,
+      // 撮影と同じ画質にそろえる（1.0 だと1回の登録の上限 50MB にすぐ届く）
+      quality: UPLOAD_JPEG_QUALITY,
     });
     if (!res.canceled && res.assets.length > 0) {
       const pages = res.assets.map((a) => ({ uri: a.uri, type: a.mimeType ?? "image/jpeg" }));

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import {
   listCategories,
+  UPLOAD_JPEG_QUALITY,
   VISIBILITY_HELP,
   type CaptureMode,
   type Category,
@@ -98,9 +99,11 @@ export function CaptureModal({
     shootingRef.current = true;
     setShooting(true);
     try {
-      // 最高画質で撮る（OCR の精度は解像度と圧縮の少なさで決まる）。ピントは既定の
-      // 連続オートフォーカス（autofocus="off" = 必要に応じて合わせ直す）のままにする
-      const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
+      // 解像度はそのまま（4032px ≒ A4 で約 340dpi）、JPEG の画質は 0.9 にする。1.0 だと1枚 9MB 前後になり、
+      // 6〜7枚で 1回の登録の上限（プロキシの 50MB）を超えて 413 になる。0.9 で約3分の1になり、OCR への影響は
+      // ない（PaddleOCR は長辺 1600px に縮めて読む）。ピントは既定の連続オートフォーカス
+      // （autofocus="off" = 必要に応じて合わせ直す）のままにする
+      const photo = await cameraRef.current.takePictureAsync({ quality: UPLOAD_JPEG_QUALITY });
       if (!photo) return;
       // 画質チェック: 低解像度を警告 (F-09)
       if (photo.width && Math.min(photo.width, photo.height) < 1000) {
