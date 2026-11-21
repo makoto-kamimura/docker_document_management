@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   BrowserRouter,
@@ -19,6 +19,8 @@ import { GroupsPage } from "./pages/GroupsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { StoragePage } from "./pages/StoragePage";
 import { CategoriesPage } from "./pages/CategoriesPage";
+import { SsoCompletePage } from "./pages/SsoCompletePage";
+import { SsoSection } from "./components/SsoSection";
 import {
   isAuthenticated,
   clearToken,
@@ -104,7 +106,13 @@ const NAV: NavItem[] = [
 ];
 
 // 自分の表示名の変更（家族の確認状況・コメントに出る名前）
-function ProfileModal({ onClose }: { onClose: () => void }) {
+function ProfileModal({
+  onClose,
+  ssoNotice,
+}: {
+  onClose: () => void;
+  ssoNotice: { linked: boolean; error: string | null };
+}) {
   const { me, setMe } = useMe();
   const [name, setName] = useState(me?.name ?? "");
   const [saving, setSaving] = useState(false);
@@ -146,6 +154,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
           {me?.email}
           {me?.tenant_name ? `（${me.tenant_name}）` : ""}
         </p>
+        <SsoSection notice={ssoNotice} />
         {error && <div className="login-error">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>キャンセル</button>
@@ -160,7 +169,17 @@ function Sidebar() {
   const navigate = useNavigate();
   const { me } = useMe();
   const { unread } = useUnread();
+  const location = useLocation();
   const [profile, setProfile] = useState(false);
+  // SSO の連携から戻ってきたら（?sso=linked / ?sso_error=…）、アカウントの画面を開いて結果を出す
+  const [ssoNotice, setSsoNotice] = useState<{ linked: boolean; error: string | null }>({ linked: false, error: null });
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (!q.has("sso") && !q.has("sso_error")) return;
+    setSsoNotice({ linked: q.get("sso") === "linked", error: q.get("sso_error") });
+    setProfile(true);
+    navigate(location.pathname, { replace: true });
+  }, [location.search, location.pathname, navigate]);
   function logout() {
     clearToken();
     navigate("/login", { replace: true });
@@ -218,7 +237,15 @@ function Sidebar() {
             <span>{me?.tenant_name ? `${me.tenant_name} / ${me.email}` : me?.email ?? ""}</span>
           </div>
         </button>
-        {profile && <ProfileModal onClose={() => setProfile(false)} />}
+        {profile && (
+          <ProfileModal
+            ssoNotice={ssoNotice}
+            onClose={() => {
+              setProfile(false);
+              setSsoNotice({ linked: false, error: null });
+            }}
+          />
+        )}
         <button className="btn-logout" onClick={logout}>
           <IoLogOutOutline />
           ログアウト
@@ -284,6 +311,7 @@ function App() {
         <UnreadProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/auth/sso/complete" element={<SsoCompletePage />} />
             <Route path="/" element={<Navigate to="/documents" replace />} />
             <Route
               path="/documents"

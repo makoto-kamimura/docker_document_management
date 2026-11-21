@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { IoAlertCircleOutline, IoDocumentText } from "react-icons/io5";
+import { IoAlertCircleOutline } from "react-icons/io5";
 import { login, apiErrorMessage } from "../api/client";
+import { fetchSsoName, SSO_COPY, ssoErrorMessage, startSso } from "../api/sso";
 
 // ログイン (F-33)
 export function LoginPage() {
@@ -9,7 +10,24 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sso, setSso] = useState<string | null>(null);
   const location = useLocation();
+  const ssoError = new URLSearchParams(location.search).get("sso_error");
+
+  useEffect(() => {
+    void fetchSsoName().then(setSso);
+  }, []);
+
+  async function onSso() {
+    setError(null);
+    setLoading(true);
+    try {
+      await startSso("login");
+    } catch {
+      setError(ssoErrorMessage("failed", "login", sso ?? "SSO"));
+      setLoading(false);
+    }
+  }
   const from = (location.state as { from?: string } | null)?.from ?? "/documents";
 
   async function onSubmit(e: React.FormEvent) {
@@ -30,14 +48,14 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="brand-mark"><IoDocumentText /></div>
+        <img className="brand-mark" src="/favicon.svg" alt="" />
         <h1>紙ログ</h1>
         <p className="subtitle">サインインして続行</p>
 
-        {error && (
+        {(error || ssoError) && (
           <div className="login-error">
             <IoAlertCircleOutline />
-            {error}
+            {error ?? ssoErrorMessage(ssoError, "login", sso ?? "SSO")}
           </div>
         )}
 
@@ -70,6 +88,18 @@ export function LoginPage() {
         <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={loading}>
           {loading ? "サインイン中…" : "サインイン"}
         </button>
+
+        {sso && (
+          <>
+            <p style={{ textAlign: "center", color: "var(--text-subtle)", fontSize: 13, margin: "16px 0 8px" }}>
+              {SSO_COPY.or}
+            </p>
+            <button type="button" className="btn" style={{ width: "100%" }} disabled={loading} onClick={onSso}>
+              {SSO_COPY.login(sso)}
+            </button>
+            <p style={{ color: "var(--text-subtle)", fontSize: 12, margin: "8px 0 0" }}>{SSO_COPY.loginHint(sso)}</p>
+          </>
+        )}
       </form>
     </div>
   );
