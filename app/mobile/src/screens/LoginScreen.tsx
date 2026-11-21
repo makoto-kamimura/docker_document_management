@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Image,
   View,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { login, apiErrorMessage } from "../api/client";
 import { registerForPush, takePendingDocument } from "../push";
+import { fetchSsoName, signInWithSso, SSO_COPY } from "../sso";
 import { colors, radius } from "../theme";
 
 // ログイン (F-33)
@@ -20,17 +22,38 @@ export function LoginScreen({ navigation }: any) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sso, setSso] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetchSsoName().then(setSso);
+  }, []);
+
+  function enter() {
+    navigation.replace("Main");
+    registerForPush(); // EAS の projectId 設定時のみ。完了を待たない
+    // ログイン前にタップしたプッシュ通知があればその書類を開く
+    const pending = takePendingDocument();
+    if (pending) navigation.navigate("Detail", { id: pending });
+  }
+
+  async function onSso() {
+    setError(null);
+    setBusy(true);
+    try {
+      if (await signInWithSso("login", sso ?? "SSO")) enter();
+    } catch (e: any) {
+      setError(e instanceof Error ? e.message : "ログインに失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSubmit() {
     setError(null);
     setBusy(true);
     try {
       await login(email.trim(), password);
-      navigation.replace("Main");
-      registerForPush(); // EAS の projectId 設定時のみ。完了を待たない
-      // ログイン前にタップしたプッシュ通知があればその書類を開く
-      const pending = takePendingDocument();
-      if (pending) navigation.navigate("Detail", { id: pending });
+      enter();
     } catch (e: any) {
       setError(apiErrorMessage(e, "ログインに失敗しました。接続先とIDをご確認ください。"));
     } finally {
@@ -43,9 +66,7 @@ export function LoginScreen({ navigation }: any) {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.logo}>
-        <Ionicons name="document-text" size={30} color={colors.primary} />
-      </View>
+      <Image source={require("../../assets/logo.png")} style={styles.logo} accessibilityIgnoresInvertColors />
       <Text style={styles.title}>紙ログ</Text>
       <Text style={styles.subtitle}>サインインして続行</Text>
 
@@ -81,6 +102,16 @@ export function LoginScreen({ navigation }: any) {
       <TouchableOpacity style={[styles.btn, busy && { opacity: 0.7 }]} onPress={onSubmit} disabled={busy}>
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>サインイン</Text>}
       </TouchableOpacity>
+
+      {sso && (
+        <>
+          <Text style={styles.or}>{SSO_COPY.or}</Text>
+          <TouchableOpacity style={[styles.ssoBtn, busy && { opacity: 0.7 }]} onPress={onSso} disabled={busy}>
+            <Text style={styles.ssoBtnText}>{SSO_COPY.login(sso)}</Text>
+          </TouchableOpacity>
+          <Text style={styles.hint}>{SSO_COPY.loginHint(sso)}</Text>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -88,13 +119,9 @@ export function LoginScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: "center", paddingHorizontal: 28, backgroundColor: colors.surface },
   logo: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: colors.primarySoft,
+    width: 72,
+    height: 72,
     alignSelf: "center",
-    alignItems: "center",
-    justifyContent: "center",
     marginBottom: 18,
   },
   title: { fontSize: 28, fontWeight: "800", textAlign: "center", color: colors.text },
@@ -116,6 +143,16 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  or: { textAlign: "center", color: colors.textSubtle, fontSize: 13, marginTop: 18, marginBottom: 8 },
+  ssoBtn: {
+    borderRadius: radius.md,
+    paddingVertical: 15,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  ssoBtnText: { color: colors.primary, fontWeight: "700", fontSize: 16 },
+  hint: { color: colors.textSubtle, fontSize: 12, marginTop: 8, textAlign: "center" },
   error: {
     flexDirection: "row",
     alignItems: "center",

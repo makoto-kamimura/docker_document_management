@@ -203,13 +203,13 @@ flowchart LR
 
 | 画面 | 内容 |
 |---|---|
-| ログイン | メールアドレスとパスワードでログイン |
+| ログイン | メールアドレスとパスワードでログイン。SSO が有効なら「SSO でログイン」 |
 | ドキュメント一覧 | 上にカテゴリ（アイコン付き、折り返して全部表示）、その下に区分（すべて / 未読 / 重要 / 期限あり / 既読）を等幅で1行に。幅の狭い端末でも横スクロールしない。一覧 / サムネイルの切り替えはヘッダー右 |
 | 撮影 | 連続撮影、書類を合わせる枠の表示、撮影中と確認画面でのカテゴリの選択（見られる人を一行で表示）、カラー / グレー / 白黒の切り替え、プレビュー・並べ替え・削除、画像 / PDF の取り込み、オフライン時の退避と再送 |
 | ドキュメント詳細 | 画像をタップすると全画面（ピンチ・ダブルタップで拡大、拡大中は指で移動）、複数ページのページ送り、カテゴリと画質の警告、家族の確認状況・コメント・もう一度通知、検索可能 PDF / OCR 全文 PDF の保存と共有、削除（削除できる人だけ。確認してから完全に消し、一覧へ戻る）。画面下にコメント欄と「あなたの対応」のアイコンを固定し、対応を押すと（入力中のコメントも送って）一覧へ戻る |
 | 検索 | 入力中はタイトル・タグ・カテゴリで端末内の絞り込み（通信なし）、キーボードの「検索」か「本文からも探す」で全文検索 |
 | お知らせ | 通知の一覧（未読バッジ） |
-| アカウント | 各タブのヘッダー右の名前から開く。表示名の変更・アカウント情報・ログアウト |
+| アカウント | 各タブのヘッダー右の名前から開く。表示名の変更・アカウント情報・SSO の連携と「SSO だけでログインする」・ログアウト |
 
 モバイルアプリにはテナントの操作を置かない。全体管理者は、Web のテナント管理で選んだテナントの中で使う。
 
@@ -217,7 +217,7 @@ flowchart LR
 
 ### 6.1 ログイン
 
-メールアドレスとパスワードで認証する（F-33）。多要素認証・SSO（F-34）は未対応。
+メールアドレスとパスワードで認証する（F-33）。連携した人は、共通の認証サーバーの SSO（パスキーの 2 段階認証つき）でもログインできる（F-34、[16章](#16-認証の実装)）。SSO の連携・解除と「SSO だけでログインする」は、Web はサイドバー下の名前（アカウント）、モバイルはアカウントの画面で行う。
 
 ### 6.2 全体管理者
 
@@ -355,7 +355,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 | No. | 要件 | 区分 | 状態 | 仕様 |
 |---|---|---|---|---|
 | F-33 | ユーザー登録・認証 | 必須 | 実装済み | 管理者がユーザーを作る。ID / パスワードで認証する。表示名は本人が変えられる（`PATCH /auth/me`） |
-| F-34 | 多要素認証・SSO | 推奨 | 未着手 | |
+| F-34 | 多要素認証・SSO | 推奨 | 実装済み | 共通の認証サーバー（OpenID Connect）でのログイン。2 段階認証は認証サーバーのパスキー。連携した人だけ（[16章](#16-認証の実装)） |
 | F-35 | ロール管理 | 必須 | 実装済み | 全体管理者 / 管理者 / 登録者 / 閲覧者 |
 | F-35a | テナント単位のデータ分離 | 必須 | 実装済み | [12章](#12-テナント分離) |
 | F-36 | ドキュメント / フォルダ単位の権限 | 必須 | 一部 | ドキュメント単位の権限とグループ自動共有。フォルダ単位は対象外 |
@@ -487,11 +487,18 @@ docker compose up --build
 - 本番では `JWT_SECRET` や各データストアのパスワードを必ず変更すること（`.env.example` の値は開発用ダミー）。
 - 外部ストレージ連携には `STORAGE_SECRET_KEY`（保存先の認証情報を暗号化する Fernet 鍵）が要る。`backend` と `ocr-worker` に同じ値を渡す。鍵を変えると登録済みの保存先は復号できなくなる。
 - Google ドライブ連携には `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI` と、連携後に戻る `WEB_BASE_URL` が要る（手順は[運用手順書](docs/runbooks/operation.md)）。
+- SSO（任意）には `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `PUBLIC_BASE_URL` が要る。4 つがそろわなければ SSO は無効で、画面にも出ない。細かい設定は `OIDC_REQUIRE_MFA`（既定 `true`）・`OIDC_DISPLAY_NAME`（`SSO`）・`OIDC_MOBILE_REDIRECT_PREFIXES`（`dms://,exp://`）・`OIDC_LINK_DENY_EMAIL_DOMAINS`（`example.com`）・`OIDC_ALLOW_PASSWORD_FOR_SSO_ONLY`（非常用、既定 `false`）。認証サーバーに登録するリダイレクト URI は `{PUBLIC_BASE_URL}/api/v1/auth/sso/callback`。
 
 ## 16. 認証の実装
 
 - `POST /api/v1/auth/login` に OAuth2 のパスワードフロー（フォーム）でメールアドレスとパスワードを送ると、JWT（HS256、既定 60分）が返る。パスワードは bcrypt で保存する。
 - 以降のリクエストは `Authorization: Bearer <token>` を付ける。`get_current_user` がトークンからユーザーを取り出し、テナントに属さない一般ユーザーは 403 にする。
+- **SSO でログイン**: 共通の認証サーバー（OpenID Connect）でログインし、パスワードのログインと同じ JWT を発行する。仕様は、認証サーバーのリポジトリ（docker_auth_server）の `docs/runbooks/app-integration.md` と同じ（ほかの自作アプリと共通）。実装は `app/services/oidc.py` と `app/api/routes/sso.py`。
+  - パスワードでログインしたあと、アカウントの画面で自分の SSO のアカウントを連携した人だけが使える。新しい利用者は作らない。メールアドレスの一致では自動でひも付けない。デモ用（`@example.com`）には連携できない。
+  - 既定では、認証サーバーにパスキー（2 段階認証）でログインした人だけを通す（ID トークンの `amr` に `mfa`）。
+  - ID トークンは、認証サーバーの公開鍵（`jwks_uri`）で署名を確かめ、`iss`・`aud`・`exp`・`nonce` も確かめる。署名の確認は python-jose を使わず `cryptography` で行い、方式は RS256/384/512・PS256/384/512・ES256・EdDSA だけを許す。
+  - PKCE を二重に使う（クライアント ↔ API と、API ↔ 認証サーバー）。`state`・`intent`・結果コードは DB にハッシュだけを保存し、1 回で消す。Web は `sessionStorage`、モバイルはメモリに `code_verifier` を持つ。モバイルは `expo-web-browser` でアプリ内のブラウザを開き、`dms://auth/sso`（Expo Go では `exp://…/--/auth/sso`）で戻る。
+  - **SSO だけでログインする**（本人が選ぶ）: JWT の `amr` クレームに「ログインした方法」（`pwd` / `sso`）を入れ、`get_current_user` がリクエストのたびに確かめる。オンにすると、パスワードでのログインを 403 で断り、パスワードで発行したトークン（以前の `amr` のないものも）はほかの端末のものも含めて 401 になる。オンにできるのは、連携済みで SSO でログイン中の人だけ。連携を解除すると外れる。非常用に `OIDC_ALLOW_PASSWORD_FOR_SSO_ONLY=true`。
 - ロールの確認は `require_role` で行う。全体管理者は常に通す（操作中のテナントの中で）。
 - 扱うテナントは `tenant_scope` で決める。一般ユーザーは自分のテナント、全体管理者は操作中のテナント（`users.active_tenant_id`）に固定する。全体管理者が未選択なら 409 を返す。切り替えは `PUT /tenants/active` だけで行う。
 - ドキュメントを見られるかは `deps.can_access`、一覧・検索・ログ・通知の絞り込みは同じ判定を SQL にした `deps.visible_documents_clause` で行う（[3.2節](#32-ドキュメントへのアクセス判定)）。
@@ -587,7 +594,9 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 |---|---|---|
 | `tenants` | `slug`（一意）, `name`, `description`, `is_demo`, `storage_backend_id` | データ分離の単位。`storage_backend_id` は新しい書類の保存先（NULL は既定の MinIO） |
 | `storage_backends` | `tenant_id`, `kind`（`s3` / `webdav` / `gdrive`）, `preset`, `name`, `config`, `secret_encrypted`, `is_onprem`, `last_test_ok`, `last_test_error`, `last_tested_at` | テナントが登録した外部の保存先。認証情報は暗号化して保存する |
-| `users` | `email`（一意）, `name`, `role`, `hashed_password`, `tenant_id`, `is_child`, `active_tenant_id` | `super_admin` だけ `tenant_id` が NULL で、代わりに `active_tenant_id`（操作中のテナント）を持つ。`is_child` は子供の印 |
+| `users` | `email`（一意）, `name`, `role`, `hashed_password`, `tenant_id`, `is_child`, `active_tenant_id`, `sso_only` | `super_admin` だけ `tenant_id` が NULL で、代わりに `active_tenant_id`（操作中のテナント）を持つ。`is_child` は子供の印。`sso_only` は「SSO だけでログインする」 |
+| `user_identities` | `user_id`, `provider`（`sso`）, `subject`（認証サーバーの `sub`）, `email`（表示用）, `last_login_at` | SSO の連携。`(provider, subject)` と `(user_id, provider)` が一意 |
+| `oauth_flows` | `mode`, `user_id`, `intent_hash` / `state_hash` / `result_hash`（どれもハッシュ）, `client_challenge`, `return_to`, `expires_at` | SSO の途中の状態。使ったら消す |
 | `groups` | `tenant_id`, `name`, `description` | 名前はテナント内で一意 |
 | `group_members` | `group_id`, `user_id` | グループの所属 |
 | `categories` | `tenant_id`, `name`, `visibility`（`everyone` / `adults` / `family` / `owner`）, `sort_order`, `icon`, `color` | 書類のカテゴリと公開範囲。名前はテナント内で一意。アイコンは Ionicons の名前（`-outline` を除く）、色は8色の名前 |
@@ -614,6 +623,12 @@ uvicorn を複数のワーカーで起動すると、それぞれが `init_db` �
 | ヘルス | `GET /health` | 稼働確認 | なし |
 | 認証 | `POST /auth/login` | ログインして JWT を得る | なし |
 | 認証 | `GET /auth/me`, `PATCH /auth/me` | ログイン中のユーザー、自分の表示名の変更 | ログイン |
+| SSO | `GET /auth/providers` | SSO が使えるか（`{sso, sso_name}`） | なし |
+| SSO | `GET /auth/sso/start` | SSO の開始（`mode`・`client`・`code_challenge`・モバイルは `redirect_uri`・連携は `intent`）。認証サーバーへ 303 | なし |
+| SSO | `GET /auth/sso/callback` | 認証サーバーからの戻り。`?code=` か `?error=`（not_linked / mfa_required / cancelled / expired / failed）でクライアントへ 303 | なし |
+| SSO | `POST /auth/sso/exchange` | 結果コードと `code_verifier` の交換。ログインなら JWT、連携なら（Bearer の本人を確かめて）登録 | なし（連携は Bearer） |
+| SSO | `GET /me/identities`, `POST /me/identities/sso/intent`, `DELETE /me/identities/sso` | 自分の連携と「SSO だけ」の状態、連携の開始に使う intent、連携の解除（「SSO だけ」も外す） | ログイン |
+| SSO | `PUT /me/sso-only` | 「SSO だけでログインする」の切り替え（オンは SSO でログイン中の人だけ） | ログイン |
 | テナント | `GET /tenants` | テナント一覧 | 全体管理者 |
 | テナント | `POST /tenants`, `PATCH /tenants/{id}`, `DELETE /tenants/{id}` | 作成（サンプルのカテゴリも作る）・変更・削除（空のテナントのみ削除可） | 全体管理者 |
 | テナント | `PUT /tenants/active` | 操作中のテナントの切り替え（`tenant_id`） | 全体管理者 |

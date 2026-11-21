@@ -11,6 +11,8 @@
      `add_category_columns()`    … カテゴリと全体管理者の列（documents.category_id / users.is_child /
                                     users.active_tenant_id）
      `add_category_style_columns()` … カテゴリのアイコン・色（categories.icon / color）
+     `add_sso_columns()`         … SSO の「SSO だけでログインする」（users.sso_only）
+     `add_sso_columns()`         … SSO の「SSO だけでログインする」（users.sso_only）
   3. シード/バックフィル         … テナント作成と `tenant_id` の充填、旧カテゴリ文字列の移し替え
                                     (`move_free_text_categories`)
   4. `finalize()`                … NOT NULL 制約とテナント内一意制約の付与
@@ -100,6 +102,20 @@ def add_category_style_columns() -> None:
                 ),
                 {"icon": icon, "color": color, "name": name},
             )
+
+
+def add_sso_columns() -> None:
+    """SSO の「SSO だけでログインする」の列を追加する（user_identities / oauth_flows は create_all が作成）。"""
+    if not _is_postgres():
+        return
+    _exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_only BOOLEAN NOT NULL DEFAULT false")
+
+
+def add_sso_columns() -> None:
+    """SSO の「SSO だけでログインする」の列（user_identities / oauth_flows は create_all が作成）。"""
+    if not _is_postgres():
+        return
+    _exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_only BOOLEAN NOT NULL DEFAULT false")
 
 
 def move_free_text_categories(db: Session) -> None:

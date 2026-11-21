@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.security import create_access_token, verify_password
+from app.services import oidc
 from app.db.session import get_db
 from app.models.tenant import Tenant
 from app.models.user import User
@@ -22,6 +23,12 @@ def login(
     user = db.scalar(select(User).where(User.email == form.username))
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="メールアドレスまたはパスワードが不正です")
+    # 「SSO だけ」の人は、パスワードが合っていても断る（パスワードが違えば上の 401 のまま。設定は漏らさない）
+    if not oidc.login_method_allowed(user, "pwd"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"このアカウントは {oidc.display_name()} でのログインだけが許可されています",
+        )
     token = create_access_token(subject=str(user.id), role=user.role.value)
     return {"access_token": token, "token_type": "bearer"}
 

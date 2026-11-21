@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.db.seed import init_db
 from app.api.routes import (
     health, auth, categories, documents, family, notifications, search, logs, tenants, users,
-    groups, storage,
+    groups, storage, sso,
 )
 from app.services.storage import ensure_buckets
 
@@ -24,6 +24,7 @@ from app.models import document_tag as _document_tag  # noqa: F401
 from app.models import document_version as _document_version  # noqa: F401
 from app.models import family as _family  # noqa: F401
 from app.models import storage_backend as _storage_backend  # noqa: F401
+from app.models import sso as _sso  # noqa: F401
 
 
 @asynccontextmanager
@@ -47,6 +48,7 @@ app.add_middleware(
 # ルーター登録
 app.include_router(health.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
+app.include_router(sso.router, prefix=settings.api_v1_prefix)
 app.include_router(tenants.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)
