@@ -34,7 +34,6 @@ import type { IconType } from "react-icons";
 import {
   IoBugOutline,
   IoBusinessOutline,
-  IoDocumentText,
   IoDocumentTextOutline,
   IoFolderOutline,
   IoLogOutOutline,
@@ -191,7 +190,7 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark"><IoDocumentText /></div>
+        <img className="brand-mark" src="/favicon.svg" alt="" />
         <div className="brand-text">
           <strong>紙ログ</strong>
           <span>Document Management</span>
