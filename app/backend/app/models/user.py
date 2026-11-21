@@ -44,7 +44,11 @@ class User(Base):
     )
     # 子供。公開範囲が「子供以外」のカテゴリの書類は見られない（ロールとは別に付ける）
     is_child: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # SSO だけでログインする（本人が選ぶ）。パスワードでのログインと、パスワードで発行したトークンを断る
+    sso_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # SSO だけでログインする（本人がアカウントの画面で選ぶ）。パスワードのログインとトークンを断る
+    sso_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     @property
     def scope_tenant_id(self) -> uuid.UUID | None:

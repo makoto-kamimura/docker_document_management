@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy import ColumnElement, false, select, true
 from sqlalchemy.orm import Session
 
-from app.core.security import decode_token
+from app.core.security import decode_token, login_method
+from app.services import oidc
 from app.db.session import get_db
 from app.models.category import Category, CategoryVisibility
 from app.models.document import Document
@@ -18,6 +19,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
@@ -34,6 +36,11 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise cred_exc
+    # 「SSO だけ」の人のパスワードのトークンは、ほかの端末のものも含めてその時点から断る
+    method = login_method(payload)
+    if not oidc.login_method_allowed(user, method):
+        raise cred_exc
+    request.state.login_method = method
     if user.role != Role.super_admin and user.tenant_id is None:
         # テナント未所属（移行失敗など）は何も見せない
         raise HTTPException(status_code=403, detail="テナントに所属していません。管理者に連絡してください")

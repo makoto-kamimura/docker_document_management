@@ -40,6 +40,38 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # SSO（共通の認証サーバー。OpenID Connect）。仕様は docker_auth_server の
+    # docs/runbooks/app-integration.md。発行元・クライアント ID・秘密・公開 URL がそろったときだけ有効。
+    # 認証サーバーに登録するリダイレクト URI は {public_base_url}/api/v1/auth/sso/callback
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    public_base_url: str = ""
+    oidc_require_mfa: bool = True           # 認証サーバーにパスキー（2 段階認証）で入った人だけを通す
+    oidc_display_name: str = "SSO"
+    oidc_scope: str = "openid email profile"
+    oidc_mobile_redirect_prefixes: str = "dms://,exp://"   # モバイルの戻り先として許す URL の先頭
+    oidc_link_deny_email_domains: str = "example.com"      # このドメインの利用者（デモ用）には連携させない
+    oidc_allow_password_for_sso_only: bool = False         # 非常用: 「SSO だけ」の人にもパスワードを許す
+
+    # SSO（共通の認証サーバー。OpenID Connect）。共通の仕様は認証サーバーのリポジトリ（docker_auth_server）の
+    # docs/runbooks/app-integration.md。発行元・クライアント ID・秘密・公開 URL がそろったときだけ有効。
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    # 外から見えるアプリの URL。認証サーバーに登録するリダイレクト URI は {public_base_url}/api/v1/auth/sso/callback
+    public_base_url: str = ""
+    oidc_display_name: str = "SSO"
+    oidc_scope: str = "openid email profile"
+    # 2 段階認証（ID トークンの amr に mfa）でログインした人だけを通す
+    oidc_require_mfa: bool = True
+    # モバイルの戻り先として許す URL の先頭（カンマ区切り。ビルド版と Expo Go）
+    oidc_mobile_redirect_prefixes: str = "dms://,exp://"
+    # このドメインのメールアドレスの利用者には連携させない（誰でも入れるデモ用アカウント）
+    oidc_link_deny_email_domains: str = "example.com"
+    # 非常用: true なら「SSO だけ」の人にもパスワードのログインを許す
+    oidc_allow_password_for_sso_only: bool = False
+
     # OCR（縦書き jpn_vert + 横書き jpn + 英数 eng。traineddata は worker イメージに導入済）
     ocr_lang: str = "jpn+jpn_vert+eng"
     # 撮影した書類の本文を読むエンジン。paddle なら PaddleOCR（RapidOCR / ONNX Runtime）で読み、
