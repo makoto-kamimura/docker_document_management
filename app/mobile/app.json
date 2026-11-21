@@ -17,8 +17,10 @@
       ],
       "expo-notifications",
       "expo-sharing",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
-    "icon": "./assets/icon.png"
+    "icon": "./assets/icon.png",
+    "scheme": "dms"
   }
 }

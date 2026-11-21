@@ -12,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { apiErrorMessage, clearToken, updateMe, type User } from "../api/client";
 import { useMe } from "../me";
+import { SsoSection } from "../components/SsoSection";
 import { colors, radius } from "../theme";
 
 const ROLE_LABEL: Record<User["role"], string> = {
@@ -110,6 +111,8 @@ export function AccountScreen({ navigation }: any) {
           border
         />
       </View>
+
+      <SsoSection />
 
       <TouchableOpacity style={styles.logout} onPress={logout}>
         <Ionicons name="log-out-outline" size={18} color={colors.danger} />
