@@ -1,9 +1,14 @@
 # --- Web フレームワーク ---
-fastapi==0.111.0
+# fastapi は 0.112 から python-multipart を自動では入れないので、下で明記する
+fastapi==0.165.0
+# フォームの解析の脆弱性（メモリの使い切り）が直った版。fastapi 経由でも入るが、下限を守るため固定する
+starlette==1.10.0
 uvicorn[standard]==0.30.1
-pydantic==2.7.4
-pydantic-settings==2.3.4
-python-multipart==0.0.9
+# fastapi 0.135 以降は pydantic>=2.9 を要求する
+pydantic==2.14.4
+pydantic-settings==2.16.3
+# フォームの解析のサービス妨害が直った版（ログイン前の /auth/login も multipart/urlencoded を解析する）
+python-multipart==0.0.34
 
 # --- DB ---
 sqlalchemy==2.0.31
@@ -28,8 +33,8 @@ cryptography>=42
 # --- OCR / 画像 / PDF ---
 pytesseract==0.3.10
 opencv-python-headless==4.10.0.84
-Pillow==10.4.0
-pypdf==4.2.0
+# 取り込んだ PDF の中の画像も pikepdf 経由で解読するため、画像の解読器の脆弱性が直った版にする
+Pillow==13.0.0
 ocrmypdf==16.4.1
 # ocrmypdf 16.4.1 は pikepdf>=8.10.1 を要求するが、pikepdf 9+ で Pdf.check() が
 # 削除され非互換になるため 8.x に固定する。
