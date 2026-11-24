@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "react-router";
 import { IoAlertCircleOutline } from "react-icons/io5";
 import { login, apiErrorMessage } from "../api/client";
 import { fetchSsoName, SSO_COPY, ssoErrorMessage, startSso } from "../api/sso";

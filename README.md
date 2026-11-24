@@ -404,7 +404,7 @@ OCR 本文から、次をルールベースで判定する。外部サービス�
 | 領域 | 技術 |
 |---|---|
 | モバイル | React Native 0.88 / Expo SDK 58 / React 19.3 / TypeScript / React Navigation 7 / expo-camera / expo-notifications |
-| Web | React 18 / TypeScript / Vite 5 / React Router 6 |
+| Web | React 18 / TypeScript / Vite 7 / React Router 7 |
 | バックエンド | Python 3.12 / FastAPI / SQLAlchemy 2 / Pydantic 2 |
 | OCR・画像処理 | PaddleOCR（PP-OCRv6 small、RapidOCR + ONNX Runtime。本文）/ Tesseract（`jpn+jpn_vert+eng`、tessdata_best）+ ocrmypdf（検索可能 PDF）/ OpenCV / Pillow |
 | 文書解析・通知 | ルールベース解析 / アプリ内通知 / Expo Push |
