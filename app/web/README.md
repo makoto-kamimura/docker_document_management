@@ -4,7 +4,7 @@ React + TypeScript (Vite) のSPA。ドキュメント管理・全文検索・ロ
 
 ## 技術スタック
 - React 18 / TypeScript / Vite
-- react-router-dom / axios
+- React Router 7 (react-router) / axios
 
 ## ディレクトリ
 ```

@@ -9,7 +9,7 @@ import {
   Navigate,
   useNavigate,
   useLocation,
-} from "react-router-dom";
+} from "react-router";
 import { DocumentsPage } from "./pages/DocumentsPage";
 import { TenantsPage } from "./pages/TenantsPage";
 import { SearchPage } from "./pages/SearchPage";
