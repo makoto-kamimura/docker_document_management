@@ -1,4 +1,4 @@
-# 紙ログ
+# 紙ログ（docker_document_management）
 
 > **届いた紙を、撮って、探せて、家族で見逃さない。**
 
@@ -27,6 +27,7 @@
 | ステータス | **フェーズ1〜4（認証・撮影・OCR・検索）、フェーズ9（家族での共有・通知）、フェーズ10（テナント分離）、フェーズ13（カテゴリと公開範囲）の主要機能を実装済み**（[開発ロードマップ](#14-開発ロードマップ)） |
 | 公開デモ | https://document.makoto-kamimura.com （デモ用アカウントの案内はポートフォリオ側に掲載） |
 | 作成者 | **Makoto Kamimura** — [@makoto-kamimura](https://github.com/makoto-kamimura) |
+| ライセンス | [MIT](LICENSE) |
 
 このREADMEは、プロジェクト紹介と仕様書を兼ね、次の2部と付録で構成する。
 
